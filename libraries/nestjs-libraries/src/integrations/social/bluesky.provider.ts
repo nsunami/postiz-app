@@ -261,7 +261,7 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
         key: 'service',
         label: 'Service',
         defaultValue: 'https://bsky.social',
-        validation: `/^(https?:\\/\\/)?((([a-zA-Z0-9\\-_]{1,256}\\.[a-zA-Z]{2,6})|(([0-9]{1,3}\\.){3}[0-9]{1,3}))(:[0-9]{1,5})?)(\\/[^\\s]*)?$/`,
+        validation: `/^(https?:\/\/)?((([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})|((?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}))(?::\d{1,5})?(\/[^\s?#]*)?(\?[^\s#]*)?(#\S*)?$/`,
         type: 'text' as const,
       },
       {
