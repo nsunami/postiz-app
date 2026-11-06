@@ -1,6 +1,10 @@
 ---
 name: "Build Containers"
 
+permissions:
+  contents: read
+  packages: write
+
 on:
   workflow_dispatch:
   push:
