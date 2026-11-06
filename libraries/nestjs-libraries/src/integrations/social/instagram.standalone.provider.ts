@@ -4,7 +4,7 @@ import {
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import dayjs from 'dayjs';
 import {
   SocialAbstract,
@@ -61,6 +61,9 @@ export class InstagramStandaloneProvider
         return 'Trial Reels must be a video';
       }
     }
+    if (firstPost?.some((f) => (f?.alt?.length ?? 0) > 1000)) {
+      return 'Instagram alt text can be up to 1000 characters';
+    }
     return true;
   }
 
@@ -68,7 +71,10 @@ export class InstagramStandaloneProvider
     body: string,
     status: number
   ):
-    | { type: 'refresh-token' | 'bad-body' | 'retry'; value: string }
+    | {
+        type: 'refresh-token' | 'bad-body' | 'retry' | 'disconnect';
+        value: string;
+      }
     | undefined {
     return instagramProvider.handleErrors(body, status);
   }
@@ -103,7 +109,7 @@ export class InstagramStandaloneProvider
   }
 
   async generateAuthUrl() {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     return {
       url:
         `https://www.instagram.com/oauth/authorize?enable_fb_login=0&client_id=${
@@ -117,7 +123,7 @@ export class InstagramStandaloneProvider
         )}&response_type=code&scope=${encodeURIComponent(
           this.scopes.join(',')
         )}` + `&state=${state}`,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -147,6 +153,16 @@ export class InstagramStandaloneProvider
         body: formData,
       })
     ).json();
+
+    if (!getAccessToken.access_token) {
+      console.error(
+        'Instagram standalone token exchange failed:',
+        JSON.stringify(getAccessToken)
+      );
+      throw new Error(
+        getAccessToken.error_message || 'Instagram token exchange failed'
+      );
+    }
 
     const { access_token, expires_in, ...all } = await (
       await fetch(

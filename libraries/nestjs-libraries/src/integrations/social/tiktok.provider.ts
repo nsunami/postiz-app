@@ -7,15 +7,18 @@ import {
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import dayjs from 'dayjs';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import {
   BadBody,
   Disconnect,
   RefreshToken,
   SocialAbstract,
   ValidityMedia,
+  rangeReadFailure,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { TikTokDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/tiktok.dto';
 import { timer } from '@gitroom/helpers/utils/timer';
+import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { createReadStream } from 'fs';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
@@ -67,6 +70,22 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       (firstItems?.[0]?.path?.indexOf?.('mp4') ?? -1) > -1
     ) {
       return 'You need one media';
+    }
+
+    // TikTok fails the whole photo post when a single image is oversized, and
+    // the status only says `picture_size_check_failed` without naming it.
+    if (firstItems?.every((p) => (p?.path?.indexOf?.('mp4') ?? -1) === -1)) {
+      const dimensions = await Promise.all(
+        firstItems?.map((p) => this.getImageDimensions(p?.path)) ?? []
+      );
+      const tooBig = dimensions.findIndex(
+        (p) => Math.min(p?.width ?? 0, p?.height ?? 0) > 1080
+      );
+      if (tooBig > -1) {
+        return `Image ${tooBig + 1} is ${dimensions[tooBig]?.width}x${
+          dimensions[tooBig]?.height
+        }, TikTok allows a maximum of 1080px on the shorter side`;
+      }
     }
     return true;
   }
@@ -260,7 +279,8 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     if (body.indexOf('picture_size_check_failed') > -1) {
       return {
         type: 'bad-body' as const,
-        value: 'Video must be at least 720p, Picture must no exceed 1080p',
+        value:
+          'Media size not supported by TikTok: images up to 1080px on the shorter side, videos at least 360px on both sides',
       };
     }
 
@@ -321,7 +341,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
   }
 
   async generateAuthUrl() {
-    const state = Math.random().toString(36).substring(2);
+    const state = makeSecureId(16);
 
     return {
       url:
@@ -430,8 +450,9 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     integration: Integration
   ): Promise<PendingCheckResponse> {
     let post: any;
+    let publicPostId: string | undefined;
     try {
-      post = await (
+      const raw = await (
         await this.fetch(
           'https://open.tiktokapis.com/v2/post/publish/status/fetch/',
           {
@@ -448,7 +469,8 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
           0,
           true
         )
-      ).json();
+      ).text();
+      ({ post, publicPostId } = this.parsePublishStatus(raw));
     } catch (err) {
       if (err instanceof RefreshToken || err instanceof Disconnect) {
         throw err;
@@ -460,27 +482,27 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       return { status: 'pending', pendingData };
     }
 
-    const { status, publicaly_available_post_id } = post?.data || {};
+    const { status } = post?.data || {};
 
     if (status === 'SEND_TO_USER_INBOX') {
+      // the id stays 'missing' until the user publishes the draft - the
+      // publish id rides in the URL fragment so resolveReleaseId can ask later
       return {
         status: 'completed',
-        releaseURL: 'https://www.tiktok.com/messages?lang=en',
+        releaseURL: `https://www.tiktok.com/messages?lang=en#${pendingData.publishId}`,
         postId: 'missing',
       };
     }
 
     if (status === 'PUBLISH_COMPLETE') {
-      // an empty array is truthy, so index it once and branch on the value
-      const publicPostId = publicaly_available_post_id?.[0];
-
+      // the id only shows up once moderation approves the post - fall back to
+      // the profile URL and keep the publish_id (resolveReleaseId fixes it later)
       return {
         status: 'completed',
         releaseURL: !publicPostId
           ? `https://www.tiktok.com/@${integration.profile}`
-          : `https://www.tiktok.com/@${integration.profile}/video/${publicPostId}`,
-        // TikTok returns the id as a number, releaseId in the db is a string
-        postId: !publicPostId ? pendingData.publishId : String(publicPostId),
+          : this.postUrl(integration, pendingData.publishId, publicPostId),
+        postId: !publicPostId ? pendingData.publishId : publicPostId,
       };
     }
 
@@ -495,6 +517,23 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     }
 
     return { status: 'pending', pendingData };
+  }
+
+  // photo posts (p_pub_... / p_inbox_...) live under /photo/, TikTok rejects
+  // /video/ for them
+  private postUrl(integration: Integration, publishId: string, postId: string) {
+    return `https://www.tiktok.com/@${integration.profile}/${
+      publishId.indexOf('p_') === 0 ? 'photo' : 'video'
+    }/${postId}`;
+  }
+
+  // TikTok returns publicaly_available_post_id as an int64, which JSON.parse
+  // rounds past 2^53 - pull the digits out of the raw body before parsing.
+  private parsePublishStatus(raw: string) {
+    const [, publicPostId] =
+      raw.match(/"publicaly_available_post_id"\s*:\s*\[\s*"?(\d+)/) || [];
+
+    return { post: JSON.parse(raw), publicPostId };
   }
 
   // UPLOAD does not publish - it only drops the media into the user's TikTok
@@ -563,6 +602,12 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
           ...(isPhoto
             ? {
                 auto_add_music: firstPost.settings.autoAddMusic === 'yes',
+              }
+            : {}),
+          ...(!isPhoto && firstPost?.media?.[0]?.thumbnailTimestamp != null
+            ? {
+                video_cover_timestamp_ms:
+                  firstPost?.media?.[0]?.thumbnailTimestamp,
               }
             : {}),
         },
@@ -690,9 +735,11 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
   // Returns a streaming body for the [start, end] byte range of the media so we
   // never hold the whole file in memory: a ranged GET for remote URLs, a ranged
-  // read stream for local files.
+  // read stream for local files. `release` drops the source when the upload
+  // ends without reading it to the end, so its connection is not held open.
   private async tiktokChunkStream(path: string, start: number, end: number) {
     if (path.indexOf('http') === 0) {
+      const controller = new AbortController();
       // identity encoding so the store keeps content-length and can answer
       // with the requested range, matching every other media read
       const response = await fetch(path, {
@@ -701,23 +748,29 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
           'accept-encoding': 'identity',
         },
         dispatcher: getSsrfSafeDispatcher(),
+        signal: controller.signal,
       } as any);
 
       // A store that ignores Range (200 with the full file) or answers with an
       // error page would corrupt the upload at this offset.
       if (response.status !== 206) {
+        await response.body?.cancel().catch(() => {});
         throw new BadBody(
           'tiktok-error-upload',
-          '{}',
+          rangeReadFailure(response),
           '{}',
           'The media storage did not return the requested byte range, please try again'
         );
       }
 
-      return response.body;
+      return { body: response.body, release: () => controller.abort() };
     }
 
-    return createReadStream(path, { start, end });
+    const stream = createReadStream(
+      this.localMediaPath(path, 'tiktok-error-upload'),
+      { start, end }
+    );
+    return { body: stream, release: () => stream.destroy() };
   }
 
   // Streams the video bytes to the upload_url returned by the init call.
@@ -735,37 +788,84 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       const start = i * chunkSize;
       const end =
         i === totalChunkCount - 1 ? videoSize - 1 : start + chunkSize - 1;
-      const contentLength = end - start + 1;
 
-      const body = await this.tiktokChunkStream(path, start, end);
-
-      const upload = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': contentType,
-          'Content-Length': String(contentLength),
-          'Content-Range': `bytes ${start}-${end}/${videoSize}`,
-        },
-        body,
-        // Required by undici when streaming a request body.
-        duplex: 'half',
-      } as any);
-
-      if (
-        upload.status !== 200 &&
-        upload.status !== 201 &&
-        upload.status !== 206
-      ) {
-        const text = await upload.text().catch(() => '{}');
-        const handleError = this.handleErrors(text);
-        throw new BadBody(
-          'tiktok-error-upload',
-          text,
-          Buffer.from(text),
-          handleError?.value || 'Failed to upload the video to TikTok'
-        );
-      }
+      await this.uploadTikTokChunk(
+        uploadUrl,
+        path,
+        start,
+        end,
+        videoSize,
+        contentType
+      );
     }
+  }
+
+  // TikTok documents a 5xx on a chunk as a gateway or internal error and asks
+  // to submit the chunk again, so the source stream is re-opened per attempt.
+  // 429 is retried the same way this.fetch does.
+  private async uploadTikTokChunk(
+    uploadUrl: string,
+    path: string,
+    start: number,
+    end: number,
+    videoSize: number,
+    contentType: string,
+    totalRetries = 0
+  ): Promise<void> {
+    const { body, release } = await this.tiktokChunkStream(path, start, end);
+
+    setHeartbeatDetails(`tiktok: upload chunk ${start}-${end}`);
+
+    const upload = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': contentType,
+        'Content-Length': String(end - start + 1),
+        'Content-Range': `bytes ${start}-${end}/${videoSize}`,
+      },
+      body,
+      // Required by undici when streaming a request body.
+      duplex: 'half',
+    } as any).catch((err) => {
+      release();
+      throw err;
+    });
+
+    if (
+      upload.status === 200 ||
+      upload.status === 201 ||
+      upload.status === 206
+    ) {
+      return;
+    }
+
+    // TikTok can answer before reading the whole chunk
+    release();
+    const text = await upload.text().catch(() => '{}');
+
+    if (
+      (upload.status >= 500 || upload.status === 429) &&
+      totalRetries <= 2
+    ) {
+      await timer(5000);
+      return this.uploadTikTokChunk(
+        uploadUrl,
+        path,
+        start,
+        end,
+        videoSize,
+        contentType,
+        totalRetries + 1
+      );
+    }
+
+    const handleError = this.handleErrors(text);
+    throw new BadBody(
+      'tiktok-error-upload',
+      text,
+      Buffer.from(text),
+      handleError?.value || 'Failed to upload the video to TikTok'
+    );
   }
 
   private buildTikokSourceInfoBody(
@@ -1109,17 +1209,38 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     }
   }
 
-  async postAnalytics(
-    integrationId: string,
+  // Posts published before moderation finished keep their publish_id
+  // (v_pub_file~... / p_pub_url~...) as releaseId - resolve it to the post id
+  async resolveReleaseId(
     accessToken: string,
-    postId: string,
-    fromDate: number
-  ): Promise<AnalyticsData[]> {
-    const today = dayjs().format('YYYY-MM-DD');
+    releaseId: string,
+    integration: Integration,
+    settings: any,
+    releaseURL: string
+  ) {
+    // a draft sent to the inbox (UPLOAD) is stored as 'missing' with its
+    // publish id in the URL fragment
+    const draft = releaseId === 'missing';
+    const publishId = draft ? releaseURL?.split('#')[1] || '' : releaseId;
+    if (
+      publishId.indexOf('_pub_') === -1 &&
+      publishId.indexOf('_inbox_') === -1
+    ) {
+      return undefined;
+    }
 
-    if (postId.indexOf('v_pub_url') > -1) {
-      const post = await (
-        await fetch(
+    // TikTok only gives a post id to posts published for public viewership
+    // (a draft ignores the privacy setting, the user picks it in the app)
+    if (
+      !draft &&
+      ['SELF_ONLY', 'MUTUAL_FOLLOW_FRIENDS'].includes(settings?.privacy_level)
+    ) {
+      return { unavailable: true as const };
+    }
+
+    const { publicPostId } = this.parsePublishStatus(
+      await (
+        await this.fetch(
           'https://open.tiktokapis.com/v2/post/publish/status/fetch/',
           {
             method: 'POST',
@@ -1128,18 +1249,57 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
               Authorization: `Bearer ${accessToken}`,
             },
             body: JSON.stringify({
-              publish_id: postId,
+              publish_id: publishId,
             }),
           }
         )
-      ).json();
+      ).text()
+    );
 
-      if (!post?.data?.publicaly_available_post_id?.[0]) {
-        return [];
-      }
-
-      postId = post.data.publicaly_available_post_id[0];
+    if (!publicPostId) {
+      // a draft with no public post (not published yet, or published as
+      // non-public) keeps opening the inbox instead of asking to retry
+      return draft ? undefined : { pending: true as const };
     }
+
+    return {
+      postId: publicPostId,
+      releaseURL: this.postUrl(integration, publishId, publicPostId),
+    };
+  }
+
+  async releaseUrl(accessToken: string, releaseId: string) {
+    const data = await (
+      await this.fetch(
+        'https://open.tiktokapis.com/v2/video/query/?fields=id,share_url',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            filters: {
+              video_ids: [releaseId],
+            },
+          }),
+        }
+      )
+    ).json();
+
+    // share_url carries tracking params (the app's client key among them)
+    return data?.data?.videos?.[0]?.share_url?.split('?')[0] as
+      | string
+      | undefined;
+  }
+
+  async postAnalytics(
+    integrationId: string,
+    accessToken: string,
+    postId: string,
+    fromDate: number
+  ): Promise<AnalyticsData[]> {
+    const today = dayjs().format('YYYY-MM-DD');
 
     try {
       // Query video details using the video ID

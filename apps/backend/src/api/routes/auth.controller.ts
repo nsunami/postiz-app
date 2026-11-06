@@ -7,7 +7,10 @@ import {
   Query,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { ThrottlerRealIpGuard } from '@gitroom/nestjs-libraries/throttler/throttler.provider';
 import { Response, Request } from 'express';
 
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
@@ -22,8 +25,9 @@ import { EmailService } from '@gitroom/nestjs-libraries/services/email.service';
 import { RealIP } from 'nestjs-real-ip';
 import { UserAgent } from '@gitroom/nestjs-libraries/user/user.agent';
 import { Provider } from '@prisma/client';
-import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import * as Sentry from '@sentry/nestjs';
+import { FarcasterProvider } from '@gitroom/nestjs-libraries/integrations/social/farcaster.provider';
 
 @ApiTags('Auth')
 @Controller('/auth')
@@ -219,7 +223,7 @@ export class AuthController {
     @Query() query: any,
     @Res({ passthrough: true }) response: Response
   ) {
-    const state = `login-${makeId(16)}`;
+    const state = `login-${makeSecureId(16)}`;
     response.cookie('oauth_state', state, {
       domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
       ...(!process.env.NOT_SECURED
@@ -285,6 +289,30 @@ export class AuthController {
     }
   }
 
+  // public and creates a signer at Neynar per call, so cap it per client
+  @UseGuards(ThrottlerRealIpGuard)
+  @Throttle({ default: { limit: 30, ttl: 3600000 } })
+  @Post('/farcaster/signer')
+  async farcasterSigner() {
+    try {
+      return await new FarcasterProvider().createSigner();
+    } catch (err: any) {
+      return { error: err.message || 'Failed to create signer' };
+    }
+  }
+
+  // the modal polls every 2s for up to 10 minutes, so leave room for that
+  @UseGuards(ThrottlerRealIpGuard)
+  @Throttle({ default: { limit: 1000, ttl: 3600000 } })
+  @Get('/farcaster/signer')
+  async farcasterSignerStatus(@Query('signerUuid') signerUuid: string) {
+    try {
+      return await new FarcasterProvider().signerStatus(signerUuid);
+    } catch (err: any) {
+      return { error: err.message || 'Failed to check signer' };
+    }
+  }
+
   @Post('/oauth/:provider/redirect')
   oauthRedirect(
     @Param('provider') provider: string,
@@ -320,12 +348,20 @@ export class AuthController {
       return response.status(400).send('Invalid request');
     }
 
-    const { jwt, token } = await this._authService.checkExists(
+    // Existing-user OAuth login: this path doesn't run routeAuth, so read the
+    // org invite cookie and join the org here too (when the invite is valid).
+    // See register/login for the same logic.
+    const getOrgFromCookie = this._authService.getOrgFromCookie(
+      req?.cookies?.org
+    );
+
+    const { jwt, token, addedOrg } = await this._authService.checkExists(
       provider,
       code,
       redirect_uri,
       state,
-      req?.cookies?.oauth_state
+      req?.cookies?.oauth_state,
+      getOrgFromCookie
     );
 
     if (token) {
@@ -346,6 +382,27 @@ export class AuthController {
 
     if (process.env.NOT_SECURED) {
       response.header('auth', jwt);
+    }
+
+    // Joined a new org via the invite: tell the frontend to switch the active
+    // org to it (mirrors register/login). showorg is also a header so the
+    // NOT_SECURED setup, which can't set cross-site cookies, still works.
+    if (typeof addedOrg !== 'boolean' && addedOrg?.organizationId) {
+      response.cookie('showorg', addedOrg.organizationId, {
+        domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
+        ...(!process.env.NOT_SECURED
+          ? {
+              secure: true,
+              httpOnly: true,
+              sameSite: 'none',
+            }
+          : {}),
+        expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
+      });
+
+      if (process.env.NOT_SECURED) {
+        response.header('showorg', addedOrg.organizationId);
+      }
     }
 
     response.header('reload', 'true');

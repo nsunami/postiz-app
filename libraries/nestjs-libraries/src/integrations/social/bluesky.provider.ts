@@ -5,7 +5,7 @@ import {
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
 import {
   BadBody,
@@ -233,7 +233,7 @@ type BlueskyPendingData = {
   'Bluesky can have maximum 1 video or 4 pictures in one post, it can also be without attachments'
 )
 export class BlueskyProvider extends SocialAbstract implements SocialProvider {
-  override maxConcurrentJob = 2; // Bluesky has moderate rate limits
+  override maxConcurrentJob = 6; // Bluesky limits are per account and per IP
   identifier = 'bluesky';
   name = 'Bluesky';
   toolTip =
@@ -301,10 +301,10 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
   }
 
   async generateAuthUrl() {
-    const state = makeId(6);
+    const state = makeSecureId(6);
     return {
       url: state,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -335,7 +335,7 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
       const {
         data: { accessJwt, refreshJwt, handle, did },
       } = await agent.login({
-        identifier: body.identifier,
+        identifier: this.loginIdentifier(body),
         password: body.password,
       });
 
@@ -352,10 +352,23 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
         picture: profile?.data?.avatar || '',
         username: profile.data.handle!,
       };
-    } catch (e) {
+    } catch (e: any) {
       console.log(e);
-      return 'Invalid credentials';
+      switch (e?.error) {
+        case 'RateLimitExceeded':
+          return 'Bluesky is temporarily refusing logins for this account, please try again later';
+        case 'XRPCNotSupported':
+          return 'Could not reach a Bluesky server at the Service URL';
+        default:
+          return 'Invalid credentials';
+      }
     }
+  }
+
+  // The stored connect body keeps whatever the user typed; Bluesky reads a
+  // leading "@" as an email address and rejects it, so strip it on every login.
+  private loginIdentifier(body: { identifier?: string }) {
+    return String(body.identifier || '').trim().replace(/^@/, '');
   }
 
   private async getAgent(integration: Integration) {
@@ -368,11 +381,25 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
 
     try {
       await agent.login({
-        identifier: body.identifier,
+        identifier: this.loginIdentifier(body),
         password: body.password,
       });
-    } catch (err) {
-      throw new RefreshToken('bluesky', JSON.stringify(err), {} as BodyInit);
+    } catch (err: any) {
+      // Only a definite 4xx (bad password, account taken down) means the
+      // credentials are broken. A 5xx or network error is Bluesky being
+      // unavailable: let it propagate as a transient failure instead of
+      // marking the channel as disconnected.
+      const status = err?.status;
+      if (
+        typeof status === 'number' &&
+        status >= 400 &&
+        status < 500 &&
+        status !== 429
+      ) {
+        throw new RefreshToken('bluesky', JSON.stringify(err), {} as BodyInit);
+      }
+
+      throw err;
     }
 
     return agent;
@@ -612,11 +639,12 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
       // this is safe and beats exhausting the check budget into a misleading
       // "check your account" warning.
       if ((pendingData.prepFailures || 0) >= 4) {
+        const reason = (err as any)?.message || String(err);
         throw new BadBody(
           'bluesky',
-          JSON.stringify({}),
+          JSON.stringify({ message: reason }),
           {} as any,
-          'Could not prepare the post for Bluesky, nothing was published, please try again'
+          `Could not prepare the post for Bluesky, nothing was published: ${reason}`
         );
       }
 
@@ -847,7 +875,7 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
     });
 
     await agent.login({
-      identifier: body.identifier,
+      identifier: this.loginIdentifier(body),
       password: body.password,
     });
 
@@ -908,7 +936,7 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
     });
 
     await agent.login({
-      identifier: body.identifier,
+      identifier: this.loginIdentifier(body),
       password: body.password,
     });
 
@@ -964,7 +992,7 @@ export class BlueskyProvider extends SocialAbstract implements SocialProvider {
     });
 
     await agent.login({
-      identifier: body.identifier,
+      identifier: this.loginIdentifier(body),
       password: body.password,
     });
 
