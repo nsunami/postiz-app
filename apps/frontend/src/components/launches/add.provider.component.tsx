@@ -178,17 +178,26 @@ export const CustomVariables: FC<{
   const schema = useMemo(() => {
     return object({
       ...variables.reduce((aIcc, item) => {
-        const splitter = item.validation.split('/');
-        const regex = new RegExp(
-          splitter.slice(1, -1).join('/'),
-          splitter.pop()
-        );
-        return {
-          ...aIcc,
-          [item.key]: string()
-            .matches(regex, `${item.label} is invalid`)
-            .required(),
-        };
+        try {
+          const splitter = item.validation.split('/');
+          const regex = new RegExp(
+            splitter.slice(1, -1).join('/'),
+            splitter.pop()
+          );
+          return {
+            ...aIcc,
+            [item.key]: string()
+              .matches(regex, `${item.label} is invalid`)
+              .required(),
+          };
+        } catch {
+          // A malformed backend rule shouldn't crash the whole modal with a
+          // SyntaxError; skip client-side validation — the backend validates it anyway.
+          return {
+            ...aIcc,
+            [item.key]: string().required(),
+          };
+        }
       }, {}),
     });
   }, [variables]);
