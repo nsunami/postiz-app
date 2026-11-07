@@ -35,6 +35,7 @@
   "disconnect": "切断",
   "connect_your_repository": "リポジトリを接続",
   "cancel": "キャンセル",
+  "discard": "破棄",
   "connect": "接続",
   "public_api": "パブリックAPI",
   "check_n8n": "Postiz用のカスタムN8Nノードをご覧ください。",

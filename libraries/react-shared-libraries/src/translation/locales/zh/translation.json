@@ -35,6 +35,7 @@
   "disconnect": "断开连接",
   "connect_your_repository": "连接你的仓库",
   "cancel": "取消",
+  "discard": "放弃",
   "connect": "连接",
   "public_api": "公共API",
   "check_n8n": "查看我们为Postiz定制的N8N节点。",

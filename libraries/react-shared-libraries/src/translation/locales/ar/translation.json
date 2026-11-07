@@ -35,6 +35,7 @@
   "disconnect": "قطع الاتصال",
   "connect_your_repository": "ربط المستودع الخاص بك",
   "cancel": "إلغاء",
+  "discard": "تجاهل",
   "connect": "اتصال",
   "public_api": "واجهة برمجة التطبيقات العامة",
   "check_n8n": "اطلع على عقدة N8N المخصصة لدينا لـ Postiz.",

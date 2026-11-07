@@ -35,6 +35,7 @@
   "disconnect": "Ngắt kết nối",
   "connect_your_repository": "Kết nối kho lưu trữ của bạn",
   "cancel": "Hủy",
+  "discard": "Loại bỏ",
   "connect": "Kết nối",
   "public_api": "API công khai",
   "check_n8n": "Hãy xem node tùy chỉnh N8N của chúng tôi cho Postiz.",

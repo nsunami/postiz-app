@@ -218,7 +218,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
           'are_you_sure_you_want_to_close_this_modal_all_data_will_be_lost',
           'Are you sure you want to close this modal? (all data will be lost)'
         ),
-        t('yes_close_it', 'Yes, close it!')
+        t('discard', 'Discard'),
+        undefined,
+        t('cancel', 'Cancel'),
+        true
       )
     ) {
       if (customClose) {

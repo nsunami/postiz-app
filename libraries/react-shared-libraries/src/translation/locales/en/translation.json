@@ -35,6 +35,7 @@
   "disconnect": "Disconnect",
   "connect_your_repository": "Connect your repository",
   "cancel": "Cancel",
+  "discard": "Discard",
   "connect": "Connect",
   "public_api": "Public API",
   "check_n8n": "Check out our N8N custom node for Postiz.",

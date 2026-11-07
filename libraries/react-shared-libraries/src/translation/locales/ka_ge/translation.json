@@ -34,6 +34,7 @@
     "disconnect": "გათიშვა",
     "connect_your_repository": "რეპოზიტორიის დაკავშირება",
     "cancel": "გაუქმება",
+    "discard": "გადაყრა",
     "connect": "დაკავშირება",
     "public_api": "საჯარო API",
     "check_n8n": "იხილეთ ჩვენი N8N მორგებული node Postiz-ისთვის.",

@@ -35,6 +35,7 @@
   "disconnect": "সংযোগ বিচ্ছিন্ন করুন",
   "connect_your_repository": "আপনার রিপোজিটরি সংযুক্ত করুন",
   "cancel": "বাতিল",
+  "discard": "পরিত্যাগ",
   "connect": "সংযুক্ত করুন",
   "public_api": "পাবলিক API",
   "check_n8n": "Postiz-এর জন্য আমাদের N8N কাস্টম নোডটি দেখুন।",

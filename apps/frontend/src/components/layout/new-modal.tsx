@@ -372,6 +372,7 @@ export const DecisionModal: FC<{
         </Button>
         {!onlyApprove && (
           <Button
+            secondary
             onClick={() => {
               resolution(false);
               closeCurrent();

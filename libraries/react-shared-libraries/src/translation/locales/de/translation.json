@@ -35,6 +35,7 @@
   "disconnect": "Trennen",
   "connect_your_repository": "Repository verbinden",
   "cancel": "Abbrechen",
+  "discard": "Verwerfen",
   "connect": "Verbinden",
   "public_api": "Öffentliche API",
   "check_n8n": "Schau dir unseren benutzerdefinierten n8n-Knoten für Postiz an.",

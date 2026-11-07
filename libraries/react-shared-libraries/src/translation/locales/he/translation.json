@@ -35,6 +35,7 @@
   "disconnect": "נתק",
   "connect_your_repository": "חבר את המאגר שלך",
   "cancel": "ביטול",
+  "discard": "להשליך",
   "connect": "חיבור",
   "public_api": "API ציבורי",
   "check_n8n": "בדקו את הצומת המותאם שלנו ל-N8N עבור Postiz.",

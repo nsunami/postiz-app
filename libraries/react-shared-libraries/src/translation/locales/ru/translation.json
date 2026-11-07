@@ -35,6 +35,7 @@
   "disconnect": "Отключить",
   "connect_your_repository": "Подключить репозиторий",
   "cancel": "Отмена",
+  "discard": "Отбросить",
   "connect": "Подключить",
   "public_api": "Публичный API",
   "check_n8n": "Ознакомьтесь с нашим пользовательским узлом N8N для Postiz.",
