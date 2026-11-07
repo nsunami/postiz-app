@@ -15,6 +15,12 @@ import Compressor from '@uppy/compressor';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
+import {
+  convertVideoToMp4,
+  isQuickTimeVideo,
+  MAX_VIDEO_CONVERSION_SIZE_BYTES,
+  VideoConversionError,
+} from '@gitroom/frontend/components/media/convert.video.to.mp4';
 import { uniqBy } from 'lodash';
 
 export class CompressionWrapper<M = any, B = any> extends Compressor<any, any> {
@@ -63,6 +69,10 @@ export function useUppyUploader(props: {
     // the complete handler runs after the processing plugin, so it has to
     // repeat the specific error instead of overwriting it with the generic one
     let lastProcessingMessage = '';
+    // The normalizer takes precedence over Transloadit, so both can stay
+    // configured and turning the normalizer off falls back to Transloadit
+    const useTransloadit = !mediaProcessing && transloadit.length > 0;
+    const serverConvertsVideo = mediaProcessing || useTransloadit;
 
     const uppy2 = new Uppy({
       autoProceed: true,
@@ -71,6 +81,108 @@ export function useUppyUploader(props: {
         // allowedFileTypes: allowedFileTypes.split(','),
         maxFileSize: 1000000000, // Default 1GB, but we'll override with custom validation
       },
+    });
+
+    // iPhone Safari reports camera/Photos videos as QuickTime, but the rest of
+    // the pipeline (storage allow-lists, providers expecting a .mp4) only
+    // accepts MP4. When no server-side converter is configured, do it here
+    // before the type check so the uploaded file is a real MP4.
+    uppy2.addPreProcessor(async (fileIDs) => {
+      if (serverConvertsVideo) {
+        return;
+      }
+
+      const allowsVideo = allowedFileTypes
+        .split(',')
+        .some((type) => type.trim().startsWith('video/'));
+
+      if (!allowsVideo) {
+        return;
+      }
+
+      for (const fileID of fileIDs) {
+        const file = uppy2.getFile(fileID);
+        if (!file || file.isRemote || !isQuickTimeVideo(file)) {
+          continue;
+        }
+
+        const progressMessage = t(
+          'converting_video_to_mp4',
+          'Converting video to MP4...'
+        );
+
+        const fail = (message: string, error: Error) => {
+          uppy2.log(message, 'error');
+          uppy2.info(message, 'error', 5000);
+          toast.show(message, 'warning');
+          if (uppy2.getFile(file.id)) {
+            uppy2.removeFile(file.id);
+          }
+          throw error;
+        };
+
+        if ((file.size ?? 0) > MAX_VIDEO_CONVERSION_SIZE_BYTES) {
+          fail(
+            t(
+              'video_too_large_to_convert',
+              'This video is too large to convert in the browser. Please trim it or export it as MP4.'
+            ),
+            new Error('Video is too large to convert')
+          );
+        }
+
+        const emitProgress = (value: number) => {
+          const current = uppy2.getFile(file.id);
+          if (current) {
+            uppy2.emit('preprocess-progress', current, {
+              mode: 'determinate',
+              value,
+              message: progressMessage,
+            });
+          }
+        };
+
+        emitProgress(0);
+
+        try {
+          const converted = await convertVideoToMp4(
+            file.data,
+            file.name ?? 'video.mov',
+            emitProgress
+          );
+
+          uppy2.setFileState(file.id, {
+            data: converted,
+            size: converted.size,
+            type: converted.type,
+            extension: 'mp4',
+            name: converted.name,
+            meta: {
+              ...file.meta,
+              type: converted.type,
+              name: converted.name,
+            },
+          });
+        } catch (err) {
+          fail(
+            err instanceof VideoConversionError && err.reason === 'too_large'
+              ? t(
+                  'video_too_large_to_convert',
+                  'This video is too large to convert in the browser. Please trim it or export it as MP4.'
+                )
+              : t(
+                  'video_conversion_failed',
+                  'Could not convert this video to MP4. Please try exporting it as MP4 and uploading again.'
+                ),
+            err instanceof Error ? err : new Error(String(err))
+          );
+        } finally {
+          const current = uppy2.getFile(file.id);
+          if (current) {
+            uppy2.emit('preprocess-complete', current);
+          }
+        }
+      }
     });
 
     // check for valid file types it can be something like this image/*,video/mp4.
@@ -185,7 +297,6 @@ export function useUppyUploader(props: {
 
     // The normalizer takes precedence over Transloadit, so both can stay
     // configured and turning the normalizer off falls back to Transloadit
-    const useTransloadit = !mediaProcessing && transloadit.length > 0;
     const { plugin, options } = getUppyUploadPlugin(
       useTransloadit ? 'transloadit' : storageProvider,
       fetch,
@@ -281,7 +392,11 @@ export function useUppyUploader(props: {
       if (useTransloadit) {
         // @ts-ignore
         const allRes = result.transloadit[0].results;
-        const toSave = uniqBy<{ name: string; originalName: string; order: number }>(
+        const toSave = uniqBy<{
+          name: string;
+          originalName: string;
+          order: number;
+        }>(
           // @ts-ignore
           Object.values(allRes).flatMap((p: any[]) => {
             return p.flatMap((item) => ({
