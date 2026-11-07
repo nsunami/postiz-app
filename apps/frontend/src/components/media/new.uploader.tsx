@@ -60,6 +60,9 @@ export function useUppyUploader(props: {
   return useMemo(() => {
     // Track file order to maintain original sequence after upload
     let fileOrderIndex = 0;
+    // the complete handler runs after the processing plugin, so it has to
+    // repeat the specific error instead of overwriting it with the generic one
+    let lastProcessingMessage = '';
 
     const uppy2 = new Uppy({
       autoProceed: true,
@@ -201,6 +204,12 @@ export function useUppyUploader(props: {
           'could_not_optimize_file',
           'Could not optimize the file, the original will be used'
         ),
+        onMessage: (message: string, kind: 'error' | 'warning') => {
+          if (kind === 'error') {
+            lastProcessingMessage = message;
+          }
+          toast.show(message, 'warning');
+        },
       });
     }
     // the normalizer resizes on the server, shrinking first would only make it upscale a blurry copy
@@ -230,22 +239,26 @@ export function useUppyUploader(props: {
       setLocked(false);
       props.onEnd();
       fileOrderIndex = 0;
+      lastProcessingMessage = '';
     });
     uppy2.on('upload-start', () => {
       props.onStart();
     });
     uppy2.on('complete', async (result) => {
       console.log(result);
+      const processingMessage = lastProcessingMessage;
+      lastProcessingMessage = '';
       for (const file of [...result.successful, ...(result.failed || [])]) {
         uppy2.removeFile(file.id);
       }
 
       if (result.failed?.length) {
         toast.show(
-          t(
-            'some_files_failed_to_upload',
-            'Some files failed to upload, please try again'
-          ),
+          processingMessage ||
+            t(
+              'some_files_failed_to_upload',
+              'Some files failed to upload, please try again'
+            ),
           'warning'
         );
       }
