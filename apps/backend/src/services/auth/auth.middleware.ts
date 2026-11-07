@@ -93,10 +93,14 @@ export class AuthMiddleware implements NestMiddleware {
       // Verify the JWT signature only. Never trust authorization-relevant
       // claims (id, isSuperAdmin, activated) from the token body — always
       // re-resolve the user from the database using the id.
-      const payload = AuthService.verifyJWT(auth) as User | null;
+      const payload = AuthService.verifyJWT(auth) as
+        | (User & { scope?: string })
+        | null;
       const orgHeader = req.cookies.showorg || req.headers.showorg;
 
-      if (!payload?.id || typeof payload.id !== 'string') {
+      // Scoped tokens (like the short-lived two-factor challenge) are never
+      // session tokens, even if one is somehow sent as the auth cookie.
+      if (!payload?.id || typeof payload.id !== 'string' || payload.scope) {
         throw new HttpForbiddenException();
       }
 

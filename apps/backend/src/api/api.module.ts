@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AuthController } from '@gitroom/backend/api/routes/auth.controller';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
+import { TwoFactorService } from '@gitroom/backend/services/auth/two-factor.service';
 import { UsersController } from '@gitroom/backend/api/routes/users.controller';
 import { AuthMiddleware } from '@gitroom/backend/services/auth/auth.middleware';
 import { StripeService } from '@gitroom/nestjs-libraries/services/stripe.service';
@@ -104,6 +105,7 @@ const authenticatedController = [
       ],
   providers: [
     AuthService,
+    TwoFactorService,
     StripeService,
     PaymentService,
     PaymentProviderManager,

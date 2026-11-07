@@ -15,6 +15,7 @@ import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 export class UsersRepository {
   constructor(
     private _user: PrismaRepository<'user'>,
+    private _userTwoFactor: PrismaRepository<'userTwoFactor'>,
     private _transaction: PrismaTransaction
   ) {}
 
@@ -308,6 +309,138 @@ export class UsersRepository {
       },
       data: {
         timezoneName: body.timezoneName || null,
+      },
+      select: {
+        id: true,
+      },
+    });
+  }
+
+  getUserTwoFactor(userId: string) {
+    return this._userTwoFactor.model.userTwoFactor.findUnique({
+      where: {
+        userId,
+      },
+    });
+  }
+
+  // A row with enabled=false is an enrollment the user has not confirmed yet.
+  upsertUserTwoFactorSecret(userId: string, secret: string) {
+    return this._userTwoFactor.model.userTwoFactor.upsert({
+      where: {
+        userId,
+      },
+      create: {
+        userId,
+        secret,
+      },
+      update: {
+        secret,
+        enabled: false,
+        recoveryCodes: [],
+        lastUsedStep: 0,
+        attempts: 0,
+        windowStart: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+  }
+
+  enableUserTwoFactor(
+    userId: string,
+    recoveryCodes: string[],
+    lastUsedStep: number
+  ) {
+    return this._userTwoFactor.model.userTwoFactor.update({
+      where: {
+        userId,
+      },
+      data: {
+        enabled: true,
+        recoveryCodes,
+        lastUsedStep,
+        attempts: 0,
+        windowStart: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+  }
+
+  async disableUserTwoFactor(userId: string) {
+    await this._userTwoFactor.model.userTwoFactor.deleteMany({
+      where: {
+        userId,
+      },
+    });
+  }
+
+  updateUserTwoFactorRecoveryCodes(
+    userId: string,
+    recoveryCodes: string[],
+    lastUsedStep: number
+  ) {
+    return this._userTwoFactor.model.userTwoFactor.update({
+      where: {
+        userId,
+      },
+      data: {
+        recoveryCodes,
+        lastUsedStep,
+      },
+      select: {
+        id: true,
+      },
+    });
+  }
+
+  useUserTwoFactorRecoveryCode(userId: string, recoveryCodes: string[]) {
+    return this._userTwoFactor.model.userTwoFactor.update({
+      where: {
+        userId,
+      },
+      data: {
+        recoveryCodes,
+        attempts: 0,
+        windowStart: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+  }
+
+  updateUserTwoFactorStep(userId: string, lastUsedStep: number) {
+    return this._userTwoFactor.model.userTwoFactor.update({
+      where: {
+        userId,
+      },
+      data: {
+        lastUsedStep,
+        attempts: 0,
+        windowStart: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+  }
+
+  updateUserTwoFactorAttempts(
+    userId: string,
+    attempts: number,
+    windowStart: Date
+  ) {
+    return this._userTwoFactor.model.userTwoFactor.update({
+      where: {
+        userId,
+      },
+      data: {
+        attempts,
+        windowStart,
       },
       select: {
         id: true,

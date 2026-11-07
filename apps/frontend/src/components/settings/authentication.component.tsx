@@ -3,6 +3,7 @@
 import React from 'react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
+import TwoFactorComponent from '@gitroom/frontend/components/settings/two-factor.component';
 
 const AuthenticationComponent = () => {
   const t = useT();
@@ -34,15 +35,18 @@ const AuthenticationComponent = () => {
   }
 
   return (
-    <div className="my-[16px] mt-[16px] bg-sixth border-fifth border rounded-[4px] p-[24px] flex flex-col gap-[24px]">
-      <div className="mt-[4px]">{t('authentication', 'Authentication')}</div>
-      <div className="flex items-center justify-between gap-[24px]">
-        <div className="text-[14px]">{method.label}</div>
-        {method.showEmail && (
-          <div className="text-[14px] text-textItemBlur">{user.email}</div>
-        )}
+    <>
+      <div className="my-[16px] mt-[16px] bg-sixth border-fifth border rounded-[4px] p-[24px] flex flex-col gap-[24px]">
+        <div className="mt-[4px]">{t('authentication', 'Authentication')}</div>
+        <div className="flex items-center justify-between gap-[24px]">
+          <div className="text-[14px]">{method.label}</div>
+          {method.showEmail && (
+            <div className="text-[14px] text-textItemBlur">{user.email}</div>
+          )}
+        </div>
       </div>
-    </div>
+      <TwoFactorComponent />
+    </>
   );
 };
 

@@ -179,4 +179,63 @@ export class UsersService {
   updateTimezone(userId: string, body: TimezoneDto) {
     return this._usersRepository.updateTimezone(userId, body);
   }
+
+  getUserTwoFactor(userId: string) {
+    return this._usersRepository.getUserTwoFactor(userId);
+  }
+
+  upsertUserTwoFactorSecret(userId: string, secret: string) {
+    return this._usersRepository.upsertUserTwoFactorSecret(userId, secret);
+  }
+
+  enableUserTwoFactor(
+    userId: string,
+    recoveryCodes: string[],
+    lastUsedStep: number
+  ) {
+    return this._usersRepository.enableUserTwoFactor(
+      userId,
+      recoveryCodes,
+      lastUsedStep
+    );
+  }
+
+  disableUserTwoFactor(userId: string) {
+    return this._usersRepository.disableUserTwoFactor(userId);
+  }
+
+  updateUserTwoFactorRecoveryCodes(
+    userId: string,
+    recoveryCodes: string[],
+    lastUsedStep: number
+  ) {
+    return this._usersRepository.updateUserTwoFactorRecoveryCodes(
+      userId,
+      recoveryCodes,
+      lastUsedStep
+    );
+  }
+
+  useUserTwoFactorRecoveryCode(userId: string, recoveryCodes: string[]) {
+    return this._usersRepository.useUserTwoFactorRecoveryCode(
+      userId,
+      recoveryCodes
+    );
+  }
+
+  updateUserTwoFactorStep(userId: string, lastUsedStep: number) {
+    return this._usersRepository.updateUserTwoFactorStep(userId, lastUsedStep);
+  }
+
+  updateUserTwoFactorAttempts(
+    userId: string,
+    attempts: number,
+    windowStart: Date
+  ) {
+    return this._usersRepository.updateUserTwoFactorAttempts(
+      userId,
+      attempts,
+      windowStart
+    );
+  }
 }

@@ -15,6 +15,7 @@ import { Response, Request } from 'express';
 
 import { CreateOrgUserDto } from '@gitroom/nestjs-libraries/dtos/auth/create.org.user.dto';
 import { LoginUserDto } from '@gitroom/nestjs-libraries/dtos/auth/login.user.dto';
+import { TwoFactorVerifyDto } from '@gitroom/nestjs-libraries/dtos/auth/two-factor.verify.dto';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
 import { ForgotReturnPasswordDto } from '@gitroom/nestjs-libraries/dtos/auth/forgot-return.password.dto';
 import { ForgotPasswordDto } from '@gitroom/nestjs-libraries/dtos/auth/forgot.password.dto';
@@ -57,13 +58,23 @@ export class AuthController {
         req?.cookies?.org
       );
 
-      const { jwt, addedOrg } = await this._authService.routeAuth(
+      const result = await this._authService.routeAuth(
         body.provider,
         body,
         ip,
         userAgent,
         getOrgFromCookie
       );
+
+      // A second factor can only be attached to an existing LOCAL account, so
+      // registration never pauses for it.
+      if ('twoFactor' in result) {
+        return response
+          .status(400)
+          .send('Two-factor authentication is not available at registration');
+      }
+
+      const { jwt, addedOrg } = result;
 
       const activationRequired =
         body.provider === 'LOCAL' && this._emailService.hasProvider();
@@ -74,39 +85,7 @@ export class AuthController {
         return;
       }
 
-      response.cookie('auth', jwt, {
-        domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
-        ...(!process.env.NOT_SECURED
-          ? {
-              secure: true,
-              httpOnly: true,
-              sameSite: 'none',
-            }
-          : {}),
-        expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
-      });
-
-      if (process.env.NOT_SECURED) {
-        response.header('auth', jwt);
-      }
-
-      if (typeof addedOrg !== 'boolean' && addedOrg?.organizationId) {
-        response.cookie('showorg', addedOrg.organizationId, {
-          domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
-          ...(!process.env.NOT_SECURED
-            ? {
-                secure: true,
-                httpOnly: true,
-                sameSite: 'none',
-              }
-            : {}),
-          expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
-        });
-
-        if (process.env.NOT_SECURED) {
-          response.header('showorg', addedOrg.organizationId);
-        }
-      }
+      this.setAuthCookies(response, jwt, addedOrg);
 
       Sentry.metrics.count('new_user', 1);
       response.header('onboarding', 'true');
@@ -131,7 +110,7 @@ export class AuthController {
         req?.cookies?.org
       );
 
-      const { jwt, addedOrg } = await this._authService.routeAuth(
+      const result = await this._authService.routeAuth(
         body.provider,
         body,
         ip,
@@ -139,39 +118,16 @@ export class AuthController {
         getOrgFromCookie
       );
 
-      response.cookie('auth', jwt, {
-        domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
-        ...(!process.env.NOT_SECURED
-          ? {
-              secure: true,
-              httpOnly: true,
-              sameSite: 'none',
-            }
-          : {}),
-        expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
-      });
-
-      if (process.env.NOT_SECURED) {
-        response.header('auth', jwt);
-      }
-
-      if (typeof addedOrg !== 'boolean' && addedOrg?.organizationId) {
-        response.cookie('showorg', addedOrg.organizationId, {
-          domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
-          ...(!process.env.NOT_SECURED
-            ? {
-                secure: true,
-                httpOnly: true,
-                sameSite: 'none',
-              }
-            : {}),
-          expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
+      if ('twoFactor' in result) {
+        return response.status(200).json({
+          twoFactor: true,
+          challenge: result.challenge,
         });
-
-        if (process.env.NOT_SECURED) {
-          response.header('showorg', addedOrg.organizationId);
-        }
       }
+
+      const { jwt, addedOrg } = result;
+
+      this.setAuthCookies(response, jwt, addedOrg);
 
       response.header('reload', 'true');
       response.status(200).json({
@@ -202,6 +158,35 @@ export class AuthController {
     return {
       reset: !!reset,
     };
+  }
+
+  @UseGuards(ThrottlerRealIpGuard)
+  @Throttle({ default: { limit: 10, ttl: 600000 } })
+  @Post('/2fa/verify')
+  async verifyTwoFactor(
+    @Req() req: Request,
+    @Body() body: TwoFactorVerifyDto,
+    @Res({ passthrough: false }) response: Response
+  ) {
+    // a cross-site form post can spoof any body field, a json body cannot
+    if (!req.headers['content-type']?.includes('application/json')) {
+      return response.status(400).send('Invalid request');
+    }
+
+    try {
+      const { jwt, addedOrg } = await this._authService.verifyTwoFactor(
+        body.challenge,
+        body.code,
+        this._authService.getOrgFromCookie(req?.cookies?.org)
+      );
+
+      this.setAuthCookies(response, jwt, addedOrg);
+
+      response.header('reload', 'true');
+      return response.status(200).json({ login: true });
+    } catch (e: any) {
+      return response.status(e?.getStatus?.() || 400).send(e.message);
+    }
   }
 
   @Get('/oauth-mobile-callback')
@@ -410,5 +395,45 @@ export class AuthController {
     response.status(200).json({
       login: true,
     });
+  }
+
+  private setAuthCookies(
+    response: Response,
+    jwt: string,
+    addedOrg: boolean | { organizationId?: string }
+  ) {
+    response.cookie('auth', jwt, {
+      domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
+      ...(!process.env.NOT_SECURED
+        ? {
+            secure: true,
+            httpOnly: true,
+            sameSite: 'none',
+          }
+        : {}),
+      expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
+    });
+
+    if (process.env.NOT_SECURED) {
+      response.header('auth', jwt);
+    }
+
+    if (typeof addedOrg !== 'boolean' && addedOrg?.organizationId) {
+      response.cookie('showorg', addedOrg.organizationId, {
+        domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
+        ...(!process.env.NOT_SECURED
+          ? {
+              secure: true,
+              httpOnly: true,
+              sameSite: 'none',
+            }
+          : {}),
+        expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
+      });
+
+      if (process.env.NOT_SECURED) {
+        response.header('showorg', addedOrg.organizationId);
+      }
+    }
   }
 }
