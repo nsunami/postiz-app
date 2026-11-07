@@ -21,6 +21,7 @@ import {
   fallbackLng,
 } from '@gitroom/react/translation/i18n.config';
 import { HtmlComponent } from '@gitroom/frontend/components/layout/html.component';
+import { ServiceWorkerRegisterComponent } from '@gitroom/frontend/components/layout/service.worker.component';
 import Script from 'next/script';
 import { ChangeDirClient } from '@gitroom/frontend/components/new-layout/change.dir.client';
 
@@ -34,6 +35,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <html>
       <head>
         <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+        <meta name="theme-color" content="#0e0e0e" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Postiz" />
+        <meta name="mobile-web-app-capable" content="yes" />
         {!!process.env.DATAFAST_WEBSITE_ID && (
           <Script
             data-website-id={process.env.DATAFAST_WEBSITE_ID}
@@ -44,6 +51,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         )}
       </head>
       <ChangeDirClient />
+      <ServiceWorkerRegisterComponent />
       <body
         className={clsx(jakartaSans.className, 'dark text-primary !bg-primary')}
       >
