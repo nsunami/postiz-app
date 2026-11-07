@@ -4,7 +4,15 @@ import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import dayjs from 'dayjs';
 import { FC, useEffect } from 'react';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import { ManageModal } from '@gitroom/frontend/components/new-launch/manage.modal';
+import dynamic from 'next/dynamic';
+
+// Lazy-load the whole editor chain (manage modal + editor + tiptap/uppy/
+// emoji-picker/copilotkit) into its own chunk loaded on first modal open.
+const ManageModal = dynamic(() =>
+  import('@gitroom/frontend/components/new-launch/manage.modal').then(
+    (mod) => mod.ManageModal
+  )
+);
 import { Integrations } from '@gitroom/frontend/components/launches/calendar.context';
 import { useShallow } from 'zustand/react/shallow';
 import { useExistingData } from '@gitroom/frontend/components/launches/helpers/use.existing.data';

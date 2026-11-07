@@ -179,6 +179,10 @@ export class IntegrationService {
     return this._integrationRepository.getIntegrationById(org, id);
   }
 
+  getIntegrationByIds(org: string, ids: string[]) {
+    return this._integrationRepository.getIntegrationByIds(org, ids);
+  }
+
   getIntegrationByInternalId(org: string, internalId: string) {
     return this._integrationRepository.getIntegrationByInternalId(
       org,

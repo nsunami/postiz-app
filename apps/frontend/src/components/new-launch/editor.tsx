@@ -11,10 +11,13 @@ import React, {
   forwardRef,
   useImperativeHandle,
 } from 'react';
+import dynamic from 'next/dynamic';
 import clsx from 'clsx';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
-import EmojiPicker from 'emoji-picker-react';
-import { Theme } from 'emoji-picker-react';
+// type-only: theme values are passed inline so emoji-picker-react can ship
+// in its own chunk and load on the first modal open via the dynamic import.
+import type { Theme } from 'emoji-picker-react';
+const EmojiPicker = dynamic(() => import('emoji-picker-react'));
 import { BoldText } from '@gitroom/frontend/components/new-launch/bold.text';
 import { UText } from '@gitroom/frontend/components/new-launch/u.text';
 import { SignatureBox } from '@gitroom/frontend/components/signature';
@@ -1099,7 +1102,7 @@ export const Editor: FC<{
                               height={400}
                               theme={
                                 (localStorage.getItem('mode') as Theme) ||
-                                Theme.DARK
+                                ('dark' as Theme)
                               }
                               onEmojiClick={(e) => {
                                 addText(e.emoji);

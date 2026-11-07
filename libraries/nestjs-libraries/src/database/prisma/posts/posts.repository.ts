@@ -81,6 +81,9 @@ export class PostsRepository {
       orderBy: {
         publishDate: 'desc',
       },
+      // Safety ceiling: this endpoint feeds a pick-a-post modal and previously
+      // returned the whole post history for the org.
+      take: 500,
       select: {
         id: true,
         content: true,
@@ -874,6 +877,31 @@ export class PostsRepository {
     });
   }
 
+  /**
+   * Light batched version of `getPostById` for the republish guard — only the
+   * fields it reads, so no integration rows or order trees are loaded.
+   */
+  getPostsForRepublishGuard(org: string, ids: string[]) {
+    return this._post.model.post.findMany({
+      where: {
+        id: {
+          in: ids,
+        },
+        organizationId: org,
+      },
+      select: {
+        id: true,
+        state: true,
+        publishDate: true,
+        integration: {
+          select: {
+            providerIdentifier: true,
+          },
+        },
+      },
+    });
+  }
+
   private get postTimelineSelect() {
     return {
       id: true,
@@ -977,34 +1005,33 @@ export class PostsRepository {
     });
   }
 
-  async getPostsCountsByDates(
-    orgId: string,
-    times: number[],
-    date: dayjs.Dayjs
-  ) {
-    const dates = await this._post.model.post.findMany({
-      where: {
-        deletedAt: null,
-        organizationId: orgId,
-        publishDate: {
-          in: times.map((time) => {
-            return date.clone().add(time, 'minutes').toDate();
-          }),
-        },
-      },
-    });
+  async getPostsByDates(orgId: string, dates: Date[]) {
+    if (!dates.length) {
+      return [];
+    }
 
-    return times.filter(
-      (time) =>
-        date.clone().add(time, 'minutes').isAfter(dayjs.utc()) &&
-        !dates.find((dateFind) => {
-          return (
-            dayjs
-              .utc(dateFind.publishDate)
-              .diff(date.clone().startOf('day'), 'minutes') == time
-          );
-        })
-    );
+    // Look-up windows can be big (days x posting times), so chunk the `in`
+    // clause instead of sending every timestamp in a single query.
+    const chunkSize = 5000;
+    const results: Array<{ publishDate: Date }> = [];
+    for (let index = 0; index < dates.length; index += chunkSize) {
+      const chunk = this._post.model.post.findMany({
+        where: {
+          deletedAt: null,
+          organizationId: orgId,
+          publishDate: {
+            in: dates.slice(index, index + chunkSize),
+          },
+        },
+        select: {
+          publishDate: true,
+        },
+      });
+
+      results.push(...(await chunk));
+    }
+
+    return results;
   }
 
   getCommentsForPosts(postIds: string[]) {
@@ -1221,6 +1248,8 @@ export class PostsRepository {
         deletedAt: null,
         parentPostId: null,
       },
+      // Safety ceiling so an org can never pull an unbounded result set.
+      take: 500,
       select: {
         id: true,
         content: true,

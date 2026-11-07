@@ -236,7 +236,12 @@ export const MediaBox: FC<{
   }, [page, debouncedSearch]);
   const { data, mutate, isLoading } = useSWR(
     `get-media-${page}-${debouncedSearch}`,
-    loadMedia
+    loadMedia,
+    {
+      // keep the previous page's grid visible while the new page/search
+      // loads instead of unmounting the whole grid.
+      keepPreviousData: true,
+    }
   );
   const [selected, setSelected] = useState([]);
   const t = useT();
@@ -391,6 +396,8 @@ export const MediaBox: FC<{
                 className="w-full h-full max-h-[100%] max-w-[100%] object-cover"
                 src={mediaDirectory.set(media.path)}
                 alt="media"
+                loading="lazy"
+                decoding="async"
               />
             )}
           </div>
@@ -590,7 +597,7 @@ export const MediaBox: FC<{
                 </div>
               </>
             )}
-            {isLoading && (
+            {isLoading && !data && (
               <>
                 {[...new Array(16)].map((_, i) => (
                   <div
@@ -688,6 +695,8 @@ export const MediaBox: FC<{
                           className="w-full h-full object-cover"
                           src={mediaDirectory.set(media.path)}
                           alt="media"
+                          loading="lazy"
+                          decoding="async"
                         />
                       )}
                     </div>
@@ -705,7 +714,7 @@ export const MediaBox: FC<{
         )}
         {!standalone && (
           <div className="flex justify-end mt-[32px] gap-[8px] mobile:flex-col mobile:mt-[16px] mobile:gap-[12px]">
-            {!isLoading && !!data?.results?.length && (
+            {!!data?.results?.length && (
               <div className="hidden mobile:flex gap-[8px] mobile:child:flex-1">
                 {btn}
                 <ThirdPartyMediaLibrary onImported={() => mutate()} />
@@ -717,7 +726,7 @@ export const MediaBox: FC<{
             >
               {t('cancel', 'Cancel')}
             </button>
-            {!isLoading && !!data?.results?.length && (
+            {!!data?.results?.length && (
               <button
                 onClick={standalone ? () => {} : addMedia}
                 disabled={selected.length === 0}
@@ -934,6 +943,8 @@ export const MultiMediaComponent: FC<{
                         <img
                           className="w-full h-full object-cover rounded-[4px] mobile:rounded-[8px]"
                           src={mediaDirectory.set(media?.path)}
+                          loading="lazy"
+                          decoding="async"
                         />
                       )}
                     </div>

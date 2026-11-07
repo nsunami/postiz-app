@@ -9,6 +9,53 @@ import { HttpForbiddenException } from '@gitroom/nestjs-libraries/services/excep
 import { MastraService } from '@gitroom/nestjs-libraries/chat/mastra.service';
 import { setSentryUserContext } from '@gitroom/nestjs-libraries/sentry/initialize.sentry';
 
+/**
+ * Small in-process TTL cache for the auth middleware hot path.
+ *
+ * Every request currently resolves the user and the picked organization from
+ * the database. Both rarely change, so we cache the resolved (user, org) pair
+ * for a short window keyed by userId + requested org. The cache is
+ * per-process, cloned so each request gets its own object, and skipped for the
+ * impersonation path or orgs that still need an apiKey generated. The short
+ * TTL keeps any staleness from user-deactivation / org-membership revocation
+ * bounded.
+ */
+const AUTH_CACHE_TTL_MS = 10_000;
+const AUTH_CACHE_MAX_ENTRIES = 10_000;
+
+type AuthCacheValue = {
+  user: User;
+  org: Record<string, any>;
+};
+
+const authCache = new Map<string, { value: AuthCacheValue; expires: number }>();
+
+const getFromAuthCache = (key: string) => {
+  const entry = authCache.get(key);
+  if (!entry) {
+    return null;
+  }
+  if (entry.expires < Date.now()) {
+    authCache.delete(key);
+    return null;
+  }
+  // Each request must get its own copy: downstream code (and the middleware
+  // itself) mutates the resolved user/org objects.
+  return structuredClone(entry.value);
+};
+
+const setToAuthCache = (key: string, value: AuthCacheValue) => {
+  // Opportunistic eviction so the cache can't grow without bound; drop the
+  // oldest entry (insertion order) instead of clearing the whole cache.
+  if (authCache.size >= AUTH_CACHE_MAX_ENTRIES) {
+    const oldest = authCache.keys().next().value;
+    if (oldest !== undefined) {
+      authCache.delete(oldest);
+    }
+  }
+  authCache.set(key, { value, expires: Date.now() + AUTH_CACHE_TTL_MS });
+};
+
 export const removeAuth = (res: Response) => {
   res.cookie('auth', '', {
     domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
@@ -47,6 +94,36 @@ export class AuthMiddleware implements NestMiddleware {
         throw new HttpForbiddenException();
       }
 
+      const orgHeaderString = String(
+        Array.isArray(orgHeader) ? orgHeader[0] : (orgHeader ?? '')
+      );
+      const impersonate = req.cookies.impersonate || req.headers.impersonate;
+
+      // Serving from cache must behave exactly like a fresh resolve: skip it
+      // when a super-admin impersonates another user, because the resolved
+      // user/org is request-specific in that case.
+      if (!impersonate) {
+        const cached = getFromAuthCache(`${payload.id}|${orgHeaderString}`);
+        if (cached) {
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-expect-error
+          req.user = cached.user;
+
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-expect-error
+          req.org = cached.org;
+
+          setSentryUserContext({
+            userId: cached.user.id,
+            email: cached.user.email,
+            orgId: cached.org.id,
+            paymentId: cached.org.paymentId,
+          });
+          next();
+          return;
+        }
+      }
+
       let user = (await this._userService.getUserById(payload.id)) as User | null;
 
       if (!user) {
@@ -57,7 +134,6 @@ export class AuthMiddleware implements NestMiddleware {
         throw new HttpForbiddenException();
       }
 
-      const impersonate = req.cookies.impersonate || req.headers.impersonate;
       if (user?.isSuperAdmin && impersonate) {
         const loadImpersonate = await this._organizationService.getUserOrg(
           impersonate
@@ -107,6 +183,15 @@ export class AuthMiddleware implements NestMiddleware {
 
       if (!setOrg.apiKey) {
         await this._organizationService.updateApiKey(setOrg.id);
+      } else if (!impersonate) {
+        // `user` has already had its password stripped at this point, and
+        // `setOrg` is exactly the row a fresh request would have resolved.
+        // Orgs without an apiKey skip the cache so the generate-on-demand
+        // path stays verified against the database every request.
+        setToAuthCache(`${user.id}|${orgHeaderString}`, {
+          user,
+          org: setOrg,
+        });
       }
 
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
