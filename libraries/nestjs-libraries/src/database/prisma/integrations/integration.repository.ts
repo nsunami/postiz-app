@@ -494,6 +494,21 @@ export class IntegrationRepository {
     });
   }
 
+  async getIntegrationByIds(org: string, ids: string[]): Promise<Integration[]> {
+    if (!ids.length) {
+      return [];
+    }
+
+    return this._integration.model.integration.findMany({
+      where: {
+        organizationId: org,
+        id: {
+          in: ids,
+        },
+      },
+    });
+  }
+
   async getIntegrationForOrder(
     id: string,
     order: string,

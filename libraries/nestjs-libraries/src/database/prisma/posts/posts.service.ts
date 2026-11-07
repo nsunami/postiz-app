@@ -415,15 +415,20 @@ export class PostsService {
       throw new BadRequestException('All posts must have an integration id');
     }
 
+    const integrations = await this._integrationService.getIntegrationByIds(
+      organization,
+      [...new Set(body?.posts?.map((p) => p.integration.id) || [])]
+    );
+    const integrationMap = new Map(
+      integrations.map((integration) => [integration.id, integration])
+    );
+
     const mappedValues = {
       ...body,
       type: replaceDraft ? 'schedule' : body?.type,
       posts: await Promise.all(
         body?.posts?.map(async (post) => {
-          const integration = await this._integrationService.getIntegrationById(
-            organization,
-            post.integration.id
-          );
+          const integration = integrationMap.get(post.integration.id);
 
           if (!integration) {
             throw new BadRequestException(
@@ -1013,12 +1018,21 @@ export class PostsService {
       settings?: any;
     }>
   ) {
+    const integrations = await this._integrationService.getIntegrationByIds(
+      orgId,
+      [
+        ...new Set(
+          (posts || []).map((p) => p?.integration?.id).filter(Boolean)
+        ),
+      ] as string[]
+    );
+    const integrationMap = new Map(
+      integrations.map((integration) => [integration.id, integration])
+    );
+
     return Promise.all(
       (posts || []).map(async (post) => {
-        const integration = await this._integrationService.getIntegrationById(
-          orgId,
-          post?.integration?.id
-        );
+        const integration = integrationMap.get(post?.integration?.id);
 
         if (!integration) {
           throw new BadRequestException(
@@ -1153,14 +1167,30 @@ export class PostsService {
   ): Promise<any[]> {
     const postList = [];
     const batchId = uuidv4();
+
+    const needsRepublishCheck = (post: CreatePostDto['posts'][number]) =>
+      (body.type === 'schedule' || body.type === 'now') &&
+      !body.republish &&
+      post.value?.[0]?.id;
+
+    // One batched lookup for the republish guard instead of a heavy
+    // `getPostById` (full integration + submittedForOrder tree) per post.
+    const guardPostIds = body.posts
+      .filter(needsRepublishCheck)
+      .map((post) => post.value[0].id);
+    const guardPostsMap = new Map(
+      (
+        await this._postRepository.getPostsForRepublishGuard(
+          orgId,
+          guardPostIds
+        )
+      ).map((guardPost) => [guardPost.id, guardPost])
+    );
+
     for (const post of body.posts) {
-      if (
-        (body.type === 'schedule' || body.type === 'now') &&
-        !body.republish &&
-        post.value?.[0]?.id
-      ) {
+      if (needsRepublishCheck(post)) {
         this.guardAgainstRepublish(
-          await this._postRepository.getPostById(post.value[0].id, orgId),
+          guardPostsMap.get(post.value[0].id) || null,
           'createPost'
         );
       }
@@ -1547,11 +1577,10 @@ export class PostsService {
       orgId,
       integrationId
     );
-    return this.findFreeDateTimeRecursive(
+    return this.findFreeDateTimeInWindow(
       orgId,
       findTimes.length ? findTimes : [120, 400, 700],
-      dayjs.utc().startOf('day'),
-      0
+      dayjs.utc().startOf('day')
     );
   }
 
@@ -1564,43 +1593,54 @@ export class PostsService {
     return this._postRepository.createPopularPosts(post);
   }
 
-  private async findFreeDateTimeRecursive(
+  private async findFreeDateTimeInWindow(
     orgId: string,
     times: number[],
-    date: dayjs.Dayjs,
-    daysChecked: number
+    date: dayjs.Dayjs
   ): Promise<string> {
-    // stop searching after a year so an empty times list can never recurse forever
-    if (daysChecked > 365) {
-      return date
-        .clone()
-        .add(times[0] || 0, 'minutes')
-        .format('YYYY-MM-DDTHH:mm:00');
-    }
-
-    const list = await this._postRepository.getPostsCountsByDates(
+    // One batched query over the whole look-ahead window instead of a query
+    // per day (the old recursion could fire up to 365 sequential queries).
+    const candidateDays = Array.from({ length: 366 }, (_, index) =>
+      date.clone().add(index, 'day')
+    );
+    const existing = await this._postRepository.getPostsByDates(
       orgId,
-      times,
-      date
+      candidateDays.flatMap((day) =>
+        times.map((time) => day.clone().add(time, 'minutes').toDate())
+      )
     );
 
-    if (!list.length) {
-      return this.findFreeDateTimeRecursive(
-        orgId,
-        times,
-        date.add(1, 'day'),
-        daysChecked + 1
-      );
+    // Posts are compared by the minute: a post at day + time (+ any seconds)
+    // occupies that slot, matching the old minute-diff equality check.
+    const takenMinutes = new Set(
+      existing.map((post) =>
+        Math.floor(dayjs.utc(post.publishDate).valueOf() / 60000)
+      )
+    );
+
+    for (const day of candidateDays) {
+      const free = times.filter((time) => {
+        const when = day.clone().add(time, 'minutes');
+        return (
+          when.isAfter(dayjs.utc()) &&
+          !takenMinutes.has(Math.floor(when.valueOf() / 60000))
+        );
+      });
+
+      if (free.length) {
+        return day
+          .clone()
+          .add(Math.min(...free), 'minutes')
+          .format('YYYY-MM-DDTHH:mm:00');
+      }
     }
 
-    const num = list.reduce<null | number>((prev, curr) => {
-      if (prev === null || prev > curr) {
-        return curr;
-      }
-      return prev;
-    }, null) as number;
-
-    return date.clone().add(num, 'minutes').format('YYYY-MM-DDTHH:mm:00');
+    // Nothing free within the year window: fall back to the last day of the
+    // window (like the old recursive version) so the slot is never in the past.
+    return candidateDays[candidateDays.length - 1]
+      .clone()
+      .add(times[0] || 0, 'minutes')
+      .format('YYYY-MM-DDTHH:mm:00');
   }
 
   async getComments(previewId: string) {

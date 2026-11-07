@@ -14,7 +14,11 @@ const SafeImage: FC<SafeImageProps> = ({
   height,
   className,
   style,
-  ...rest
+  // Most images here are user media rendered in long grids/lists (media
+  // library, calendar, previews). Lazy by default to keep them out of the
+  // initial render cost; callers can override with eager.
+  loading = 'lazy',
+  decoding = 'async',
 }) => {
   return (
     <img
@@ -24,6 +28,8 @@ const SafeImage: FC<SafeImageProps> = ({
       height={typeof height === 'number' ? height : undefined}
       className={className}
       style={style}
+      loading={loading}
+      decoding={decoding}
     />
   );
 };
