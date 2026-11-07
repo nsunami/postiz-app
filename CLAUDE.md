@@ -13,7 +13,7 @@ We have 3 important folders
 
 - apps/backend - this is where the API code is (NESTJS)
 - apps/orchestrator - this is temporal, it's for background jobs (NESTJS) it contains all the workflows and activities
-- apps/frontend - this is the code of the frontend (Vite ReactJS)
+- apps/frontend - this is the code of the frontend (Next.js App Router)
 - /libraries contains a lot of services shared between backend and orchestrator and frontend components.
 
 We are using only pnpm, don't use any other dependency manager.
@@ -22,9 +22,15 @@ Never install frontend components from npmjs, focus on writing native components
 The project uses tailwind 3, before writing any component look at:
 - /apps/frontend/src/app/colors.scss
 - /apps/frontend/src/app/global.scss
-- /apps/frontend/tailwind.config.js
+- /apps/frontend/tailwind.config.cjs
 
 All the --color-custom* are deprecated, don't use them.
+
+The frontend is an installable PWA:
+- The web app manifest lives in /apps/frontend/src/app/manifest.ts, PWA icons in /apps/frontend/public/icons (rasterized from /apps/frontend/public/postiz.svg).
+- /apps/frontend/public/sw.js must never intercept or cache network requests (no fetch handler). The app is dynamic and cookie-authenticated; adding offline caching or push notifications is a deliberate decision, never a drive-by.
+
+On the mobile breakpoint (max-width: 1025px, tailwind screen "mobile:"), every focusable text field (input, textarea, select, the post composer editor) must compute a font-size of at least 16px, or iOS auto-zooms the whole page when focusing it. The catch-all rule is in /apps/frontend/src/app/global.scss. Desktop typography is untouched by this rule.
 
 And check other components in the system before to get the right design.
 
