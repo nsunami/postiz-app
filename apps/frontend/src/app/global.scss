@@ -603,11 +603,29 @@ html[dir='rtl'] [dir='ltr'] {
 }
 
 // the composer on phones follows the app typography
+// (font-size must stay >= 16px, iOS auto-zooms the page when focussing
+// any text field rendered below 16px)
 @media (max-width: 1025px) {
   .flat-editor .ProseMirror {
     font-family: inherit;
-    font-size: 14px;
-    line-height: 20px;
+    font-size: 16px;
+    line-height: 22px;
+  }
+
+  // mention/tag inputs on the post composer
+  .react-tags,
+  .react-tags input,
+  .tags-top .react-tags__combobox,
+  .tags-top input {
+    font-size: 16px;
+  }
+
+  // catch-all for every text field (login, settings, etc.): many inputs use
+  // inline Tailwind text-[14px] class names, so this must win over them
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='button']):not([type='submit']):not([type='reset']):not([type='file']):not([type='color']),
+  textarea,
+  select {
+    font-size: 16px !important;
   }
 
   .flat-editor .tiptap p.is-editor-empty:first-child::before {
