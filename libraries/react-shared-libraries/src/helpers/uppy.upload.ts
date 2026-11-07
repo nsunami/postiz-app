@@ -19,6 +19,9 @@ export class WaitForMediaProcessing extends BasePlugin<any, any, any> {
       fetch: any;
       processingMessage: string;
       fallbackMessage: string;
+      // Uppy's info bubble is clipped by the fixed-height uploader, so the
+      // caller shows the full processing message somewhere it can wrap (the toast)
+      onMessage?: (message: string, kind: 'error' | 'warning') => void;
       interval?: number;
       maxWait?: number;
     }
@@ -89,12 +92,17 @@ export class WaitForMediaProcessing extends BasePlugin<any, any, any> {
       // a file that only existed to be converted has nothing to fall back to
       const usable = /\.(png|jpe?g|gif|webp|mp4)$/i.test(media.name || '');
       if (!usable) {
-        this.uppy.info(media.processingError || this.opts.fallbackMessage, 'error', 5000);
-        this.uppy.setFileState(id, { error: media.processingError || 'failed' } as any);
+        const message = media.processingError || this.opts.fallbackMessage;
+        this.uppy.info(message, 'error', 5000);
+        this.opts.onMessage?.(message, 'error');
+        this.uppy.setFileState(id, {
+          error: media.processingError || 'failed',
+        } as any);
         this.uppy.emit('postprocess-complete', this.uppy.getFile(id));
         return;
       }
       this.uppy.info(this.opts.fallbackMessage, 'warning', 5000);
+      this.opts.onMessage?.(this.opts.fallbackMessage, 'warning');
     }
 
     this.uppy.setFileState(id, {

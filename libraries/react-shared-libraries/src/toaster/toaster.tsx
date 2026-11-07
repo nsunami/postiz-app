@@ -33,11 +33,11 @@ export const Toaster = () => {
   return (
     <div
       className={clsx(
-        'animate-fadeDown rounded-[8px] gap-[18px] flex items-center overflow-hidden bg-customColor8 p-[16px] min-w-[319px] fixed start-[50%] text-white z-[900] top-[32px] -translate-x-[50%] h-[56px]',
+        'animate-fadeDown rounded-[8px] gap-[18px] flex items-start overflow-hidden bg-customColor8 p-[16px] min-w-[319px] max-w-[calc(100vw_-_32px)] min-h-[56px] fixed left-[50%] text-white z-[900] top-[32px] -translate-x-[50%] mobile:min-w-0 mobile:w-[calc(100vw_-_32px)]',
         toasterType === 'success' ? 'shadow-greenToast' : 'shadow-yellowToast'
       )}
     >
-      <div>
+      <div className="shrink-0 mt-[1px]">
         {toasterType === 'success' ? (
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -66,7 +66,9 @@ export const Toaster = () => {
           </svg>
         )}
       </div>
-      <div className="flex-1 text-textColor">{toasterText}</div>
+      <div className="flex-1 min-w-0 max-h-[40vh] overflow-y-auto break-words whitespace-pre-line text-textColor scrollbar-thin scrollbar-thumb-newColColor scrollbar-track-transparent">
+        {toasterText}
+      </div>
       <svg
         xmlns="http://www.w3.org/2000/svg"
         width="60"
