@@ -53,7 +53,13 @@ const setToAuthCache = (key: string, value: AuthCacheValue) => {
       authCache.delete(oldest);
     }
   }
-  authCache.set(key, { value, expires: Date.now() + AUTH_CACHE_TTL_MS });
+  // Clone on write too: the entries must not alias the objects handed to the
+  // current request, otherwise any downstream mutation would leak into the
+  // cache and be served to later requests.
+  authCache.set(key, {
+    value: structuredClone(value),
+    expires: Date.now() + AUTH_CACHE_TTL_MS,
+  });
 };
 
 export const removeAuth = (res: Response) => {
@@ -95,7 +101,7 @@ export class AuthMiddleware implements NestMiddleware {
       }
 
       const orgHeaderString = String(
-        Array.isArray(orgHeader) ? orgHeader[0] : (orgHeader ?? '')
+        Array.isArray(orgHeader) ? orgHeader[0] : orgHeader ?? ''
       );
       const impersonate = req.cookies.impersonate || req.headers.impersonate;
 
@@ -124,7 +130,9 @@ export class AuthMiddleware implements NestMiddleware {
         }
       }
 
-      let user = (await this._userService.getUserById(payload.id)) as User | null;
+      let user = (await this._userService.getUserById(
+        payload.id
+      )) as User | null;
 
       if (!user) {
         throw new HttpForbiddenException();

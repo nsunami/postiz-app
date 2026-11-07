@@ -1018,11 +1018,14 @@ export class PostsService {
       settings?: any;
     }>
   ) {
-    const integrations =
-      await this._integrationService.getIntegrationByIds(
-        orgId,
-        [...new Set((posts || []).map((p) => p?.integration?.id).filter(Boolean))] as string[]
-      );
+    const integrations = await this._integrationService.getIntegrationByIds(
+      orgId,
+      [
+        ...new Set(
+          (posts || []).map((p) => p?.integration?.id).filter(Boolean)
+        ),
+      ] as string[]
+    );
     const integrationMap = new Map(
       integrations.map((integration) => [integration.id, integration])
     );
@@ -1610,7 +1613,9 @@ export class PostsService {
     // Posts are compared by the minute: a post at day + time (+ any seconds)
     // occupies that slot, matching the old minute-diff equality check.
     const takenMinutes = new Set(
-      existing.map((post) => Math.floor(dayjs.utc(post.publishDate).valueOf() / 60000))
+      existing.map((post) =>
+        Math.floor(dayjs.utc(post.publishDate).valueOf() / 60000)
+      )
     );
 
     for (const day of candidateDays) {

@@ -76,17 +76,20 @@ export const PostSelector: FC<{
 }> = (props) => {
   const { onClose, onSelect, only, date, noModal } = props;
   const fetch = useFetch();
-  const fetchOldPosts = useCallback(() => {
-    return fetch(
-      '/posts/old?date=' + date.utc().format('YYYY-MM-DDTHH:mm:00'),
-      {
+  // Matches the server-side `take` cap on GET /posts/old.
+  const PAGE_SIZE = 500;
+  const dateKey = date.utc().format('YYYY-MM-DDTHH:mm:00');
+  const fetchOldPosts = useCallback(
+    (atDate: string) => {
+      return fetch('/posts/old?date=' + atDate, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
-      }
-    ).then((res) => res.json());
-  }, [date]);
+      }).then((res) => res.json());
+    },
+    [fetch]
+  );
   const onCloseWithEmptyString = useCallback(() => {
     onSelect('');
     onClose();
@@ -100,13 +103,60 @@ export const PostSelector: FC<{
     },
     [current]
   );
-  const { data: loadData } = useSWR('old-posts', fetchOldPosts);
+  const { data: loadData } = useSWR(`old-posts-${dateKey}`, () =>
+    fetchOldPosts(dateKey)
+  );
+  // Older posts are fetched on demand (the endpoint returns the newest
+  // PAGE_SIZE posts before the cursor) so long histories stay reachable.
+  const [morePages, setMorePages] = useState<any[][]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  useEffect(() => {
+    setMorePages([]);
+  }, [dateKey]);
+  const allPosts = useMemo(() => {
+    const seen = new Set<string>();
+    return [...(loadData || []), ...morePages.flat()].filter((p: any) => {
+      if (!p?.id || seen.has(p.id)) {
+        return false;
+      }
+      seen.add(p.id);
+      return true;
+    });
+  }, [loadData, morePages]);
+  const lastChunk = morePages.length
+    ? morePages[morePages.length - 1]
+    : loadData;
+  const hasMore = lastChunk?.length === PAGE_SIZE;
+  const knownIds = useMemo(
+    () => new Set(allPosts.map((p: any) => p.id)),
+    [allPosts]
+  );
+  const loadMore = useCallback(async () => {
+    const oldest = allPosts[allPosts.length - 1];
+    if (loadingMore || !oldest) {
+      return;
+    }
+    setLoadingMore(true);
+    try {
+      const next = await fetchOldPosts(
+        dayjs.utc(oldest.publishDate).format('YYYY-MM-DDTHH:mm:00')
+      );
+      // The cursor is inclusive, so the boundary post repeats. If a page adds
+      // nothing new, stop paginating instead of looping on the same rows.
+      setMorePages((prev) => [
+        ...prev,
+        next.some((p: any) => !knownIds.has(p.id)) ? next : [],
+      ]);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [allPosts, loadingMore, knownIds, fetchOldPosts]);
   const data = useMemo(() => {
     if (!only) {
-      return loadData;
+      return allPosts;
     }
-    return loadData?.filter((p: any) => p.integration.type === only);
-  }, [loadData, only]);
+    return allPosts.filter((p: any) => p.integration.type === only);
+  }, [allPosts, only]);
 
   const t = useT();
 
@@ -197,6 +247,19 @@ export const PostSelector: FC<{
                       </div>
                     ))}
                   </div>
+                  {hasMore && (
+                    <div className="flex justify-center mt-[15px]">
+                      <div
+                        onClick={loadMore}
+                        className={clsx(
+                          'cursor-pointer inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors h-10 px-4 py-2 text-textColor border border-newBorder hover:text-white hover:bg-forth',
+                          loadingMore && 'opacity-20 pointer-events-none'
+                        )}
+                      >
+                        {t('load_more', 'Load more')}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
