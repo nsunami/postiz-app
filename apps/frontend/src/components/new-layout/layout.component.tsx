@@ -113,16 +113,22 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                   <AnnouncementBanner />
                   <div className="flex-1 flex gap-[8px] mobile:gap-0">
                     <Support />
-                    {menuOpen && (
-                      <div
-                        className="hidden mobile:block fixed inset-0 bg-newBackdrop opacity-60 z-[490]"
-                        onClick={() => setMenuOpen(false)}
-                      />
-                    )}
+                    <div
+                      className={clsx(
+                        'hidden mobile:block fixed inset-0 bg-newBackdrop z-[490] transition-opacity duration-300 ease-out motion-reduce:transition-none',
+                        menuOpen
+                          ? 'opacity-60'
+                          : 'pointer-events-none opacity-0'
+                      )}
+                      onClick={() => setMenuOpen(false)}
+                    />
                     <div
                       className={clsx(
                         'flex flex-col bg-newBgColorInner w-[80px] rounded-[12px] mobile:fixed mobile:top-0 mobile:bottom-0 mobile:start-0 mobile:z-[491] mobile:rounded-none mobile:overflow-y-auto mobile:overflow-x-hidden',
-                        !menuOpen && 'mobile:hidden'
+                        'mobile:transition-transform mobile:duration-300 mobile:ease-out mobile:motion-reduce:transition-none',
+                        menuOpen
+                          ? 'mobile:translate-x-0'
+                          : 'mobile:pointer-events-none mobile:-translate-x-full mobile:rtl:translate-x-full'
                       )}
                       onClick={() => setMenuOpen(false)}
                     >
@@ -145,7 +151,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                       {/* relative: the notifications popup spans this bar on phones */}
                       <div className="relative flex bg-newBgColorInner h-[80px] mobile:h-[64px] px-[20px] mobile:px-[12px] gap-[12px] items-center">
                         <button
-                          className="hidden mobile:flex items-center justify-center w-[36px] h-[36px] -ms-[6px] rounded-[8px] text-textItemBlur hover:text-newTextColor hover:bg-boxFocused"
+                          className="hidden mobile:flex items-center justify-center w-[36px] h-[36px] -ms-[6px] rounded-[8px] text-textItemBlur hover:text-newTextColor hover:bg-boxHover transition-colors"
                           onClick={() => setMenuOpen(true)}
                           aria-label="Open menu"
                         >
