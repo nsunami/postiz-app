@@ -26,6 +26,9 @@ import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/us
 import { UserDetailDto } from '@gitroom/nestjs-libraries/dtos/users/user.details.dto';
 import { EmailNotificationsDto } from '@gitroom/nestjs-libraries/dtos/users/email-notifications.dto';
 import { TimezoneDto } from '@gitroom/nestjs-libraries/dtos/users/timezone.dto';
+import { TwoFactorCodeDto } from '@gitroom/nestjs-libraries/dtos/auth/two-factor.code.dto';
+import { TwoFactorDisableDto } from '@gitroom/nestjs-libraries/dtos/auth/two-factor.disable.dto';
+import { TwoFactorService } from '@gitroom/backend/services/auth/two-factor.service';
 import { HttpForbiddenException } from '@gitroom/nestjs-libraries/services/exception.filter';
 import { RealIP } from 'nestjs-real-ip';
 import { UserAgent } from '@gitroom/nestjs-libraries/user/user.agent';
@@ -46,6 +49,7 @@ export class UsersController {
     private _authService: AuthService,
     private _orgService: OrganizationService,
     private _userService: UsersService,
+    private _twoFactorService: TwoFactorService,
     private _trackService: TrackService
   ) {}
 
@@ -240,6 +244,40 @@ export class UsersController {
     @Body() body: TimezoneDto
   ) {
     return this._userService.updateTimezone(user.id, body);
+  }
+
+  @Get('/2fa')
+  async getTwoFactor(@GetUserFromRequest() user: User) {
+    return this._twoFactorService.status(user.id);
+  }
+
+  @Post('/2fa/setup')
+  async setupTwoFactor(@GetUserFromRequest() user: User) {
+    return this._twoFactorService.setup(user.id, user.email);
+  }
+
+  @Post('/2fa/enable')
+  async enableTwoFactor(
+    @GetUserFromRequest() user: User,
+    @Body() body: TwoFactorCodeDto
+  ) {
+    return this._twoFactorService.enable(user.id, body.code);
+  }
+
+  @Post('/2fa/disable')
+  async disableTwoFactor(
+    @GetUserFromRequest() user: User,
+    @Body() body: TwoFactorDisableDto
+  ) {
+    return this._twoFactorService.disable(user.id, body.password, body.code);
+  }
+
+  @Post('/2fa/recovery-codes')
+  async regenerateTwoFactorRecoveryCodes(
+    @GetUserFromRequest() user: User,
+    @Body() body: TwoFactorCodeDto
+  ) {
+    return this._twoFactorService.regenerateRecoveryCodes(user.id, body.code);
   }
 
   @Post('/api-key/rotate')

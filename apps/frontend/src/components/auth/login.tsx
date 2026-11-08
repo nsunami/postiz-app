@@ -15,6 +15,7 @@ import { AppleProvider } from '@gitroom/frontend/components/auth/providers/apple
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { FarcasterProvider } from '@gitroom/frontend/components/auth/providers/farcaster.provider';
 import WalletProvider from '@gitroom/frontend/components/auth/providers/wallet.provider';
+import { TwoFactorForm } from '@gitroom/frontend/components/auth/two-factor.form';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 type Inputs = {
   email: string;
@@ -26,6 +27,7 @@ export function Login() {
   const t = useT();
   const [loading, setLoading] = useState(false);
   const [notActivated, setNotActivated] = useState(false);
+  const [challenge, setChallenge] = useState<string | null>(null);
   const {
     isGeneral,
     neynarClientId,
@@ -65,7 +67,28 @@ export function Login() {
       }
       setLoading(false);
     }
+
+    if (login.status === 200) {
+      const result = await login.json();
+      if (result?.twoFactor && typeof result.challenge === 'string') {
+        setChallenge(result.challenge);
+        setLoading(false);
+      }
+    }
   };
+
+  if (challenge) {
+    return (
+      <TwoFactorForm
+        challenge={challenge}
+        onCancel={() => {
+          setChallenge(null);
+          setLoading(false);
+        }}
+      />
+    );
+  }
+
   return (
     <FormProvider {...form}>
       <form className="flex-1 flex" onSubmit={form.handleSubmit(onSubmit)}>

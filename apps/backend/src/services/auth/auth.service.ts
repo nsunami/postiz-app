@@ -6,6 +6,7 @@ import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/us
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { AuthService as AuthChecker } from '@gitroom/helpers/auth/auth.service';
 import { AuthProviderManager } from '@gitroom/backend/services/auth/providers/providers.manager';
+import { TwoFactorService } from '@gitroom/backend/services/auth/two-factor.service';
 import dayjs from 'dayjs';
 import { ForgotReturnPasswordDto } from '@gitroom/nestjs-libraries/dtos/auth/forgot-return.password.dto';
 import { EmailService } from '@gitroom/nestjs-libraries/services/email.service';
@@ -17,7 +18,8 @@ export class AuthService {
     private _userService: UsersService,
     private _organizationService: OrganizationService,
     private _emailService: EmailService,
-    private _providerManager: AuthProviderManager
+    private _providerManager: AuthProviderManager,
+    private _twoFactorService: TwoFactorService
   ) {}
   async canRegister(provider: string) {
     if (
@@ -83,28 +85,16 @@ export class AuthService {
         throw new Error('Invalid user name or password');
       }
 
-      // Existing user logging in with a valid team invite: join the inviting
-      // org. Done BEFORE the activation gate on purpose, so a not-yet-activated
-      // user still gets the membership recorded -- the same model as a brand-new
-      // signup via invite, which is also added to the org while still
-      // unactivated. Activation remains required to actually use it: the throw
-      // below (and the auth middleware) keep an unactivated user out until they
-      // verify their email.
-      const addedOrg =
-        addToOrg && typeof addToOrg !== 'boolean'
-          ? await this._organizationService.addUserToOrg(
-              user.id,
-              addToOrg.id,
-              addToOrg.orgId,
-              addToOrg.role
-            )
-          : false;
-
-      if (!user.activated) {
-        throw new Error('User is not activated');
+      // The session (and, for a team invite, the org membership) is only
+      // granted after the second factor is verified.
+      if (await this._twoFactorService.isEnabled(user.id)) {
+        return {
+          twoFactor: true as const,
+          challenge: this.twoFactorChallenge(user.id),
+        };
       }
 
-      return { addedOrg, jwt: await this.jwt(user) };
+      return this.finalizeLogin(user, addToOrg, true);
     }
 
     const user = await this.loginOrRegisterProvider(
@@ -114,6 +104,25 @@ export class AuthService {
       userAgent
     );
 
+    return this.finalizeLogin(user, addToOrg);
+  }
+
+  /**
+   * Completes a login: joins the inviting org (for team invites), enforces the
+   * activation gate where it applies, and signs the session token.
+   */
+  private async finalizeLogin(
+    user: User,
+    addToOrg?: boolean | { orgId: string; role: 'USER' | 'ADMIN'; id: string },
+    requireActivated = false
+  ) {
+    // Existing user logging in with a valid team invite: join the inviting
+    // org. Done BEFORE the activation gate on purpose, so a not-yet-activated
+    // user still gets the membership recorded -- the same model as a brand-new
+    // signup via invite, which is also added to the org while still
+    // unactivated. Activation remains required to actually use it: the throw
+    // below (and the auth middleware) keep an unactivated user out until they
+    // verify their email.
     const addedOrg =
       addToOrg && typeof addToOrg !== 'boolean'
         ? await this._organizationService.addUserToOrg(
@@ -123,7 +132,54 @@ export class AuthService {
             addToOrg.role
           )
         : false;
+
+    if (requireActivated && !user.activated) {
+      throw new Error('User is not activated');
+    }
+
     return { addedOrg, jwt: await this.jwt(user) };
+  }
+
+  private twoFactorChallenge(userId: string) {
+    return AuthChecker.signJWT({
+      scope: 'two-factor',
+      sub: userId,
+      expires: dayjs().add(10, 'minutes').format('YYYY-MM-DD HH:mm:ss'),
+    });
+  }
+
+  /**
+   * Finishes a login that was paused for a second factor. The challenge is a
+   * short-lived token scoped to this flow only, it is never a session token.
+   */
+  async verifyTwoFactor(
+    challenge: string,
+    code: string,
+    addToOrg?: boolean | { orgId: string; role: 'USER' | 'ADMIN'; id: string }
+  ) {
+    let payload: { scope?: string; sub?: string; expires?: string };
+    try {
+      payload = AuthChecker.verifyJWT(challenge) as typeof payload;
+    } catch (err) {
+      throw new Error('Invalid or expired code');
+    }
+
+    if (
+      payload?.scope !== 'two-factor' ||
+      typeof payload.sub !== 'string' ||
+      typeof payload.expires !== 'string' ||
+      dayjs(payload.expires).isBefore(dayjs())
+    ) {
+      throw new Error('Invalid or expired code');
+    }
+
+    const user = await this._userService.getUserById(payload.sub);
+    if (!user) {
+      throw new Error('Invalid user');
+    }
+
+    await this._twoFactorService.verify(user.id, code);
+    return this.finalizeLogin(user, addToOrg, true);
   }
 
   public getOrgFromCookie(cookie?: string) {
