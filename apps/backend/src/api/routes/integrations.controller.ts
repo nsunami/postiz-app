@@ -37,6 +37,8 @@ import {
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { uniqBy } from 'lodash';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
+import { ClientInformation } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { AuthService } from '@gitroom/helpers/auth/auth.service';
 
 @ApiTags('Integrations')
 @Controller('/integrations')
@@ -243,17 +245,53 @@ export class IntegrationsController {
       migrateTo || integration
     );
 
-    if (integrationProvider.externalUrl && !externalUrl) {
-      throw new Error('Missing external url');
+    if (integrationProvider.externalUrl && !externalUrl && !refresh) {
+      return { err: true };
     }
 
     try {
-      const getExternalUrl = integrationProvider.externalUrl
-        ? {
+      let getExternalUrl: ClientInformation | undefined;
+
+      if (integrationProvider.externalUrl) {
+        if (externalUrl) {
+          // Fresh connect: register a Postiz OAuth app on the user's instance.
+          getExternalUrl = {
             ...(await integrationProvider.externalUrl(externalUrl)),
             instanceUrl: externalUrl,
+          };
+        } else {
+          // Reconnect: reuse the instance url and OAuth client stored
+          // encrypted at connect time, so the user doesn't have to type the
+          // instance url again.
+          const existing =
+            await this._integrationService.getIntegrationByInternalId(
+              org.id,
+              refresh
+            );
+
+          if (!existing || existing.providerIdentifier !== integration) {
+            throw new Error('Integration not found');
           }
-        : undefined;
+
+          const stored = JSON.parse(
+            AuthService.fixedDecryption(existing.customInstanceDetails || '')
+          );
+
+          if (
+            !stored?.client_id ||
+            !stored?.client_secret ||
+            !stored?.instanceUrl
+          ) {
+            throw new Error('Missing external url');
+          }
+
+          getExternalUrl = {
+            client_id: stored.client_id,
+            client_secret: stored.client_secret,
+            instanceUrl: stored.instanceUrl,
+          };
+        }
+      }
 
       const { codeVerifier, state, url } =
         await integrationProvider.generateAuthUrl(getExternalUrl);
@@ -272,12 +310,15 @@ export class IntegrationsController {
 
       await ioRedis.set(`organization:${state}`, org.id, 'EX', 3600);
       await ioRedis.set(`login:${state}`, codeVerifier, 'EX', 3600);
-      await ioRedis.set(
-        `external:${state}`,
-        JSON.stringify(getExternalUrl),
-        'EX',
-        3600
-      );
+
+      if (getExternalUrl) {
+        await ioRedis.set(
+          `external:${state}`,
+          JSON.stringify(getExternalUrl),
+          'EX',
+          3600
+        );
+      }
 
       return { url };
     } catch (err) {
