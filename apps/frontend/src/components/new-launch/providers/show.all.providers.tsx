@@ -18,6 +18,7 @@ import SlackProvider from '@gitroom/frontend/components/new-launch/providers/sla
 import KickProvider from '@gitroom/frontend/components/new-launch/providers/kick/kick.provider';
 import TwitchProvider from '@gitroom/frontend/components/new-launch/providers/twitch/twitch.provider';
 import MastodonProvider from '@gitroom/frontend/components/new-launch/providers/mastodon/mastodon.provider';
+import PixelfedProvider from '@gitroom/frontend/components/new-launch/providers/pixelfed/pixelfed.provider';
 import BlueskyProvider from '@gitroom/frontend/components/new-launch/providers/bluesky/bluesky.provider';
 import LemmyProvider from '@gitroom/frontend/components/new-launch/providers/lemmy/lemmy.provider';
 import WarpcastProvider from '@gitroom/frontend/components/new-launch/providers/warpcast/warpcast.provider';
@@ -125,6 +126,10 @@ export const Providers = [
   {
     identifier: 'mastodon',
     component: MastodonProvider,
+  },
+  {
+    identifier: 'pixelfed',
+    component: PixelfedProvider,
   },
   {
     identifier: 'bluesky',

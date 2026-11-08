@@ -388,8 +388,15 @@ export class MastodonProvider extends SocialAbstract implements SocialProvider {
     return {
       status: 'completed',
       postId: post.id,
-      releaseURL: `${pendingData.url}/statuses/${post.id}`,
+      releaseURL: this.statusUrl(pendingData.url, post),
     };
+  }
+
+  // Mastodon-compatible providers don't always use Mastodon's /statuses/:id
+  // url shape (Pixelfed uses /p/:username/:id), so subclasses can override
+  // this. The status response itself carries the canonical url when available.
+  protected statusUrl(url: string, status: any) {
+    return `${url}/statuses/${status.id}`;
   }
 
   // Old blocking behavior, kept for workflow versions before v1.0.6 that still
@@ -512,7 +519,7 @@ export class MastodonProvider extends SocialAbstract implements SocialProvider {
       {
         id: commentPost.id,
         postId: post.id,
-        releaseURL: `${url}/statuses/${post.id}`,
+        releaseURL: this.statusUrl(url, post),
         status: 'completed',
       },
     ];
