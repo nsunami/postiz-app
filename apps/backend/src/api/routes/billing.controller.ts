@@ -25,6 +25,7 @@ import {
   AuthorizationActions,
   Sections,
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import dayjs from 'dayjs';
 
 @ApiTags('Billing')
 @Controller('/billing')
@@ -186,18 +187,24 @@ export class BillingController {
   @Post('/cancel')
   async cancel(
     @GetOrgFromRequest() org: Organization,
-    @GetUserFromRequest() user: User,
-    @Body() body: { feedback: string }
+    @GetUserFromRequest() user: User
   ) {
     const result = await (await this.provider(org)).setToCancel(org.id);
 
-    if (result.cancel_at) {
-      await this._notificationService.sendEmail(
-        process.env.EMAIL_FROM_ADDRESS,
-        'Subscription Cancelled',
-        `Organization ${org.name} has cancelled their subscription because: ${body.feedback}`,
-        user.email
-      );
+    if (result.cancel_at && dayjs(result.cancel_at).isAfter(dayjs())) {
+      try {
+        await this._notificationService.sendEmail(
+          user.email,
+          'Your Postiz subscription is set to cancel',
+          `Your subscription is pending cancellation and will end on ${dayjs(
+            result.cancel_at
+          ).format(
+            'D MMM, YYYY'
+          )} (UTC), the end of your current billing cycle. Until then you can keep using Postiz as usual. Changed your mind? You can reactivate at any time from the <a href="${
+            process.env.FRONTEND_URL
+          }/billing">Billing page</a>.`
+        );
+      } catch (err) {}
     }
 
     return result;
