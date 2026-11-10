@@ -106,6 +106,24 @@ export const ContinueIntegration: FC<{
     (async () => {
       const timezone = String(newDayjs().utcOffset());
 
+      // A provider that refused the authorization redirects back with
+      // `error` / `error_description` instead of a code (TikTok does this, for
+      // example, when the app is missing one of the requested scopes). Posting
+      // that body only produces a raw "code should not be null or undefined"
+      // validation error, so show the provider's own reason instead.
+      const providerError =
+        searchParams.error_description || searchParams.error || '';
+      if (searchParams.error || !modifiedParams.code) {
+        setErrorMessage(
+          providerError === 'access_denied'
+            ? 'The authorization was cancelled'
+            : providerError ||
+                'The provider did not return an authorization code, please try connecting again'
+        );
+        setError(true);
+        return;
+      }
+
       // Try public endpoint first (handles both public and fallback scenarios)
       let data = await fetch(`/integrations/social-connect/${provider}`, {
         method: 'POST',
@@ -148,9 +166,13 @@ export const ContinueIntegration: FC<{
         data.status !== HttpStatusCode.Created
       ) {
         const errorData = await data.json().catch(() => ({}));
-        setErrorMessage(
-          errorData.message || errorData.msg || 'Could not add provider'
-        );
+        // Nest answers a validation failure with `message` as an array of
+        // strings; joining it keeps the reason readable instead of rendering
+        // every entry glued together.
+        const message = Array.isArray(errorData.message)
+          ? errorData.message.join(', ')
+          : errorData.message;
+        setErrorMessage(message || errorData.msg || 'Could not add provider');
         setError(true);
         return;
       }
