@@ -44,8 +44,9 @@ that are most expensive to get wrong.
   credentials (`Integration`, `User`, etc.).
 - **Webhooks:** payment-provider webhook code (Stripe, RevenueCat, ...) must
   never throw — catch and log failures so billing state is not left half-applied.
-- **PRs:** follow `.github/PULL_REQUEST_TEMPLATE.md` exactly. Every PR needs a
-  `# QA` section with real numbered steps (`1. [ ] ...`), and the change-type
-  section must describe the concrete change, not just "Bug fix." / "Feature.".
+- **PRs:** describe the concrete change (type, area, key file/functions, what
+  deliberately stayed the same) and include real numbered verification steps
+  (`1. [ ] ...`). "Bug fix." / "Feature." alone, `N/A`, or an empty section is
+  not acceptable.
 - Verify changes against existing code patterns; match the surrounding style
   rather than inventing new patterns.
