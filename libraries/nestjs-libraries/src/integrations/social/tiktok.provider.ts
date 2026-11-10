@@ -38,8 +38,12 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
   name = 'Tiktok';
   isBetweenSteps = false;
   convertToJPEG = true;
+  // video.list (Display API) can no longer be added to new TikTok apps, and
+  // TikTok refuses the whole authorization when an app is asked for a scope
+  // it does not have, so requiring it locked every new app out of connecting.
+  // Only the video analytics and missing-post lookups use it, and they all
+  // degrade gracefully when TikTok did not grant it.
   scopes = [
-    'video.list',
     'user.info.basic',
     'video.publish',
     'video.upload',
@@ -367,6 +371,18 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     codeVerifier: string;
     refresh?: string;
   }) {
+    // A redirect without a code (consent declined, or a TikTok-side error such
+    // as an unapproved scope) otherwise reaches the token endpoint empty and
+    // hides the real cause behind a generic failure.
+    if (!params.code) {
+      throw new BadBody(
+        'tiktok',
+        JSON.stringify({ reason: 'no code in the redirect' }),
+        Buffer.from('{}'),
+        'TikTok did not return an authorization code, the authorization was not completed'
+      );
+    }
+
     const value = {
       client_key: process.env.TIKTOK_CLIENT_ID!,
       client_secret: process.env.TIKTOK_CLIENT_SECRET!,
@@ -1093,6 +1109,23 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       }
 
       // Get recent videos and aggregate their stats
+      await this.recentVideoAnalytics(accessToken, result, today);
+
+      return result;
+    } catch (err) {
+      console.error('Error fetching TikTok analytics:', err);
+      return [];
+    }
+  }
+
+  // video.list is optional (new TikTok apps can no longer grant it), so the
+  // recent-video aggregation must never take the account-wide stats with it.
+  private async recentVideoAnalytics(
+    accessToken: string,
+    result: AnalyticsData[],
+    today: string
+  ) {
+    try {
       const videoListResponse = await fetch(
         'https://open.tiktokapis.com/v2/video/list/?fields=id',
         {
@@ -1167,11 +1200,8 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
           });
         }
       }
-
-      return result;
     } catch (err) {
-      console.error('Error fetching TikTok analytics:', err);
-      return [];
+      console.error('Error fetching TikTok video analytics:', err);
     }
   }
 
