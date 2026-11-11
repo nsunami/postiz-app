@@ -3,9 +3,26 @@ import OpenAI from 'openai';
 import { shuffle } from 'lodash';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
+import {
+  openaiApiKey,
+  openaiBaseURL,
+  openaiImageApiKey,
+  openaiImageBaseURL,
+  openaiImageModel,
+  openaiModel,
+} from '@gitroom/nestjs-libraries/openai/openai.config';
 
+// Text generation can go through an OpenAI-compatible router (OpenRouter, an
+// EU router, ...), images keep their own endpoint because chat-only routers do
+// not implement the OpenAI Images API.
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
+  apiKey: openaiApiKey(),
+  baseURL: openaiBaseURL(),
+});
+
+const openaiImages = new OpenAI({
+  apiKey: openaiImageApiKey(),
+  baseURL: openaiImageBaseURL(),
 });
 
 const PicturePrompt = z.object({
@@ -42,7 +59,7 @@ export class OpenaiService {
     const { clips } = (
       await openai.chat.completions.parse(
         {
-          model: 'gpt-4.1',
+          model: openaiModel(),
           messages: [
             {
               role: 'system',
@@ -79,9 +96,9 @@ Clips must not overlap. Write the title and the post in this language, whatever 
     // gpt-image models always return base64 (b64_json) and do not accept the
     // `response_format` parameter, unlike the deprecated dall-e-3.
     const generate = (
-      await openai.images.generate({
+      await openaiImages.images.generate({
         prompt,
-        model: 'chatgpt-image-latest',
+        model: openaiImageModel(),
         size: isVertical ? '1024x1536' : '1024x1024',
       })
     ).data[0];
@@ -93,7 +110,7 @@ Clips must not overlap. Write the title and the post in this language, whatever 
     return (
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          model: openaiModel(),
           messages: [
             {
               role: 'system',
@@ -114,7 +131,7 @@ Clips must not overlap. Write the title and the post in this language, whatever 
     return (
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          model: openaiModel(),
           messages: [
             {
               role: 'system',
@@ -148,7 +165,7 @@ Clips must not overlap. Write the title and the post in this language, whatever 
           ],
           n: 5,
           temperature: 1,
-          model: 'gpt-4.1',
+          model: openaiModel(),
         }),
         openai.chat.completions.create({
           messages: [
@@ -164,7 +181,7 @@ Clips must not overlap. Write the title and the post in this language, whatever 
           ],
           n: 5,
           temperature: 1,
-          model: 'gpt-4.1',
+          model: openaiModel(),
         }),
       ])
     ).flatMap((p) => p.choices);
@@ -202,7 +219,7 @@ Clips must not overlap. Write the title and the post in this language, whatever 
           content,
         },
       ],
-      model: 'gpt-4.1',
+      model: openaiModel(),
     });
 
     const { content: articleContent } = websiteContent.choices[0].message;
@@ -222,7 +239,7 @@ Clips must not overlap. Write the title and the post in this language, whatever 
     const posts =
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          model: openaiModel(),
           messages: [
             {
               role: 'system',
@@ -255,7 +272,7 @@ Clips must not overlap. Write the title and the post in this language, whatever 
               return (
                 (
                   await openai.chat.completions.parse({
-                    model: 'gpt-4.1',
+                    model: openaiModel(),
                     messages: [
                       {
                         role: 'system',
@@ -291,7 +308,7 @@ Clips must not overlap. Write the title and the post in this language, whatever 
         const parse =
           (
             await openai.chat.completions.parse({
-              model: 'gpt-4.1',
+              model: openaiModel(),
               messages: [
                 {
                   role: 'system',

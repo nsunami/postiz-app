@@ -20,8 +20,19 @@ import { MastraAgent } from '@ag-ui/mastra';
 import { MastraService } from '@gitroom/nestjs-libraries/chat/mastra.service';
 import { Request, Response } from 'express';
 import { RequestContext } from '@mastra/core/di';
+import OpenAI from 'openai';
+import {
+  openaiApiKey,
+  openaiBaseURL,
+  openaiModel,
+} from '@gitroom/nestjs-libraries/openai/openai.config';
 import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
 import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+
+const copilotOpenai = new OpenAI({
+  apiKey: openaiApiKey(),
+  baseURL: openaiBaseURL(),
+});
 
 export type ChannelsContext = {
   integrations: string;
@@ -60,7 +71,8 @@ export class CopilotController {
       cors: copilotCors(),
       runtime: new CopilotRuntime(),
       serviceAdapter: new OpenAIAdapter({
-        model: 'gpt-4.1',
+        openai: copilotOpenai,
+        model: openaiModel(),
       }),
     });
 
@@ -106,7 +118,8 @@ export class CopilotController {
       cors: copilotCors(),
       runtime,
       serviceAdapter: new OpenAIAdapter({
-        model: 'gpt-4.1',
+        openai: copilotOpenai,
+        model: openaiModel(),
       }),
     });
 
