@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { AuthProviderAbstract } from '@gitroom/backend/services/auth/providers.interface';
 
@@ -15,7 +15,7 @@ export class AuthProviderManager {
     );
 
     if (!found) {
-      throw new Error(`Auth provider ${provider} not found`);
+      throw new BadRequestException('Sign-in method is not available');
     }
 
     return this._moduleRef.get(found.target, { strict: false });
