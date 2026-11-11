@@ -1,25 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { Agent } from '@mastra/core/agent';
-import { createOpenAI } from '@ai-sdk/openai';
 import { Memory } from '@mastra/memory';
 import { pStore } from '@gitroom/nestjs-libraries/chat/mastra.store';
 import { array, object, string } from 'zod';
 import { ModuleRef } from '@nestjs/core';
 import { toolList } from '@gitroom/nestjs-libraries/chat/tools/tool.list';
 import { AgentToolInterface } from '@gitroom/nestjs-libraries/chat/agent.tool.interface';
-import {
-  openaiApiKey,
-  openaiBaseURL,
-  openaiChatModel,
-} from '@gitroom/nestjs-libraries/openai/openai.config';
+import { openaiChatModel } from '@gitroom/nestjs-libraries/openai/openai.config';
+import { openaiChatProvider } from '@gitroom/nestjs-libraries/openai/openai.chat.provider';
 import dayjs from 'dayjs';
-
-// `.chat` (Chat Completions) instead of the default Responses API: routers such
-// as OpenRouter do not implement /responses.
-const aiProvider = createOpenAI({
-  apiKey: openaiApiKey(),
-  baseURL: openaiBaseURL(),
-});
 
 export const AgentState = object({
   proverbs: array(string()).default([]),
@@ -125,7 +114,7 @@ export class LoadToolsService {
       )}
 `;
       },
-      model: aiProvider.chat(openaiChatModel()),
+      model: openaiChatProvider.chat(openaiChatModel()),
       tools,
       memory: new Memory({
         storage: pStore,

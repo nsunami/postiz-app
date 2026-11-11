@@ -10,7 +10,6 @@ import {
 } from '@nestjs/common';
 import {
   CopilotRuntime,
-  OpenAIAdapter,
   copilotRuntimeNodeHttpEndpoint,
 } from '@copilotkit/runtime';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
@@ -18,6 +17,7 @@ import { Organization } from '@prisma/client';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { MastraAgent } from '@ag-ui/mastra';
 import { MastraService } from '@gitroom/nestjs-libraries/chat/mastra.service';
+import { ChatCompletionsOpenAIAdapter } from '@gitroom/nestjs-libraries/chat/chat.completions.adapter';
 import { Request, Response } from 'express';
 import { RequestContext } from '@mastra/core/di';
 import OpenAI from 'openai';
@@ -27,7 +27,10 @@ import {
   openaiModel,
 } from '@gitroom/nestjs-libraries/openai/openai.config';
 import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
-import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import {
+  AuthorizationActions,
+  Sections,
+} from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
 const copilotOpenai = new OpenAI({
   apiKey: openaiApiKey(),
@@ -70,7 +73,7 @@ export class CopilotController {
       endpoint: '/copilot/chat',
       cors: copilotCors(),
       runtime: new CopilotRuntime(),
-      serviceAdapter: new OpenAIAdapter({
+      serviceAdapter: new ChatCompletionsOpenAIAdapter({
         openai: copilotOpenai,
         model: openaiModel(),
       }),
@@ -117,7 +120,7 @@ export class CopilotController {
       endpoint: '/copilot/agent',
       cors: copilotCors(),
       runtime,
-      serviceAdapter: new OpenAIAdapter({
+      serviceAdapter: new ChatCompletionsOpenAIAdapter({
         openai: copilotOpenai,
         model: openaiModel(),
       }),
