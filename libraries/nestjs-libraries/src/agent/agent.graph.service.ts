@@ -16,6 +16,14 @@ import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/me
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { GeneratorDto } from '@gitroom/nestjs-libraries/dtos/generator/generator.dto';
 import { generationError } from '@gitroom/nestjs-libraries/openai/generation.error';
+import {
+  openaiApiKey,
+  openaiBaseURL,
+  openaiImageApiKey,
+  openaiImageBaseURL,
+  openaiImageModel,
+  openaiModel,
+} from '@gitroom/nestjs-libraries/openai/openai.config';
 
 const tools = !process.env.TAVILY_API_KEY
   ? []
@@ -23,14 +31,16 @@ const tools = !process.env.TAVILY_API_KEY
 const toolNode = new ToolNode(tools);
 
 const model = new ChatOpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-4.1',
+  apiKey: openaiApiKey(),
+  model: openaiModel(),
   temperature: 0.7,
+  configuration: { baseURL: openaiBaseURL() },
 });
 
 const dalle = new DallEAPIWrapper({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'chatgpt-image-latest',
+  apiKey: openaiImageApiKey(),
+  model: openaiImageModel(),
+  baseUrl: openaiImageBaseURL(),
 });
 
 interface WorkflowChannelsState {
