@@ -839,6 +839,29 @@ export const MultiMediaComponent: FC<{
     },
     [currentMedia, insertInContent]
   );
+  // react-sortablejs calls setList from its constructor, during render, just to
+  // hand back an initialized copy of the list. Updating the post there writes
+  // to the launch store while React is rendering, which restarts the render
+  // forever (Maximum update depth exceeded), so only a real reorder may update
+  // the post.
+  const changeMediaOrder = useCallback(
+    (value: Array<{ path: string; id: string }>) => {
+      const order = (list?: Array<{ id?: string }>) =>
+        (list || []).map((item) => item?.id).join(',');
+
+      if (order(value) === order(currentMedia)) {
+        return;
+      }
+
+      onChange({
+        target: {
+          name: 'upload',
+          value,
+        },
+      });
+    },
+    [currentMedia, name, onChange]
+  );
   const showModal = useCallback(() => {
     modals.openModal({
       title: t('media_library', 'Media Library'),
@@ -891,9 +914,7 @@ export const MultiMediaComponent: FC<{
           {!!currentMedia?.length && (
             <ReactSortable
               list={currentMedia}
-              setList={(value) =>
-                onChange({ target: { name: 'upload', value } })
-              }
+              setList={changeMediaOrder}
               className="flex gap-[10px] sortable-container"
               animation={200}
               swap={true}
