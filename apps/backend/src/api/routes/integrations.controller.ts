@@ -133,6 +133,7 @@ export class IntegrationsController {
             inBetweenSteps: p.inBetweenSteps,
             refreshNeeded: p.refreshNeeded,
             isCustomFields: !!findIntegration.customFields,
+            isChromeExtension: !!findIntegration.isChromeExtension,
             ...(findIntegration.customFields
               ? { customFields: await findIntegration.customFields() }
               : {}),

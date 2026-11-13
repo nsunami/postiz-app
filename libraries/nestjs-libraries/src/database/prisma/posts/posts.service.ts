@@ -1192,6 +1192,20 @@ export class PostsService {
     );
 
     for (const post of body.posts) {
+      // the posts to update can't belong to another organization, an id that
+      // doesn't exist yet is a new post (the editor makes one for every post)
+      const postIds = [
+        ...new Set((post.value || []).map((p) => p.id).filter(Boolean)),
+      ];
+      if (
+        postIds.length &&
+        (await this._postRepository.countPostsOfOtherOrganizations(
+          orgId,
+          postIds
+        ))
+      ) {
+        throw new NotFoundException('Post not found');
+      }
       if (needsRepublishCheck(post)) {
         this.guardAgainstRepublish(
           guardPostsMap.get(post.value[0].id) || null,
