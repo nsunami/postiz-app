@@ -29,6 +29,11 @@ import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/au
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { TemporalService } from 'nestjs-temporal-core';
 import { randomBytes } from 'crypto';
+import { ApplicationFailure } from '@temporalio/common';
+import {
+  EncryptionService,
+  integrationEncryptedFields,
+} from '@gitroom/nestjs-libraries/services/encryption.service';
 
 dayjs.extend(utc);
 
@@ -42,7 +47,8 @@ export class IntegrationService {
     private _notificationService: NotificationService,
     @Inject(forwardRef(() => RefreshIntegrationService))
     private _refreshIntegrationService: RefreshIntegrationService,
-    private _temporalService: TemporalService
+    private _temporalService: TemporalService,
+    private _encryptionService: EncryptionService
   ) {}
 
   async changeActiveCron(orgId: string) {
@@ -112,7 +118,9 @@ export class IntegrationService {
     isBetweenSteps = false,
     refresh?: string,
     timezone?: number,
-    customInstanceDetails?: string
+    customInstanceDetails?: string,
+    rootInternalId?: string,
+    expectedRootInternalId?: string | null
   ) {
     const uploadedPicture = picture
       ? picture?.indexOf('imagedelivery.net') > -1
@@ -139,7 +147,9 @@ export class IntegrationService {
       isBetweenSteps,
       refresh,
       timezone,
-      customInstanceDetails
+      customInstanceDetails,
+      rootInternalId,
+      expectedRootInternalId
     );
   }
 
@@ -157,6 +167,25 @@ export class IntegrationService {
 
   getChannelHealth(org: string, includeDeleted = false) {
     return this._integrationRepository.getChannelHealth(org, includeDeleted);
+  }
+
+  // Only for providers that cannot post without a selected page: the channel
+  // is still in between steps, or its internalId still equals the account id
+  // because a token refresh flipped inBetweenSteps off
+  needsPageSelection(
+    integration: Pick<
+      Integration,
+      'inBetweenSteps' | 'internalId' | 'rootInternalId'
+    >,
+    provider: SocialProvider
+  ) {
+    return (
+      !!provider?.pageRequiredToPost &&
+      (integration.inBetweenSteps ||
+        (!!integration.rootInternalId &&
+          integration.internalId === integration.rootInternalId &&
+          !provider.isPageId?.(integration.internalId)))
+    );
   }
 
   getIntegrationForOrder(id: string, order: string, user: string, org: string) {
@@ -368,7 +397,10 @@ export class IntegrationService {
 
       await this.createOrUpdateIntegration(
         undefined,
-        !!provider.oneTimeToken,
+        // a root that is a page id (older channels) names no login: other
+        // organizations' channels of that page can belong to other logins
+        !!provider.oneTimeToken &&
+          !provider.isPageId?.(integration.rootInternalId || ''),
         integration.organizationId,
         integration.name,
         undefined,
@@ -377,7 +409,15 @@ export class IntegrationService {
         integration.providerIdentifier,
         accessToken,
         refreshToken,
-        expiresIn
+        expiresIn,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        // stored only if no reconnect moved the channel meanwhile
+        integration.rootInternalId
       );
     }
   }
@@ -428,13 +468,16 @@ export class IntegrationService {
     if (!getIntegration) {
       throw new HttpException('Integration not found', HttpStatus.NOT_FOUND);
     }
-    if (!getIntegration.inBetweenSteps) {
-      throw new HttpException('Invalid request', HttpStatus.BAD_REQUEST);
-    }
-
     const provider = this._integrationManager.getSocialIntegration(
       getIntegration.providerIdentifier
     );
+
+    if (
+      !getIntegration.inBetweenSteps &&
+      !this.needsPageSelection(getIntegration, provider)
+    ) {
+      throw new HttpException('Invalid request', HttpStatus.BAD_REQUEST);
+    }
 
     if (!provider.fetchPageInformation) {
       throw new HttpException(
@@ -452,15 +495,23 @@ export class IntegrationService {
       org,
       String(getIntegrationInformation.id)
     );
-    await this._integrationRepository.updateIntegration(id, {
-      picture: getIntegrationInformation.picture,
-      internalId: String(getIntegrationInformation.id),
-      organizationId: org,
-      name: getIntegrationInformation.name,
-      inBetweenSteps: false,
-      token: getIntegrationInformation.access_token,
-      profile: getIntegrationInformation.username,
-    });
+    const saved = await this._integrationRepository.updateIntegration(
+      id,
+      {
+        picture: getIntegrationInformation.picture,
+        internalId: String(getIntegrationInformation.id),
+        organizationId: org,
+        name: getIntegrationInformation.name,
+        inBetweenSteps: false,
+        token: getIntegrationInformation.access_token,
+        profile: getIntegrationInformation.username,
+      },
+      getIntegration
+    );
+
+    if (!saved) {
+      throw new HttpException('Invalid request', HttpStatus.BAD_REQUEST);
+    }
 
     return { success: true };
   }
@@ -613,8 +664,14 @@ export class IntegrationService {
       getIntegration.providerIdentifier
     );
 
+    // A deleted channel is neither refreshed nor called
+    if (getIntegration.deletedAt) {
+      return [];
+    }
+
     if (
-      dayjs(getIntegration?.tokenExpiration).isBefore(dayjs()) ||
+      (dayjs(getIntegration?.tokenExpiration).isBefore(dayjs()) &&
+        !integrationProvider.noRefreshBeforeCall) ||
       forceRefresh
     ) {
       const data = await this._refreshIntegrationService.refresh(
@@ -826,6 +883,64 @@ export class IntegrationService {
     );
     const loadOnlyIds = exisingData.map((p) => p.value);
     return difference(id, loadOnlyIds);
+  }
+
+  // The tokens of a channel that came from a workflow. A workflow carries the
+  // channel from one activity to the next, so an activity can get its tokens
+  // encrypted (an activity handed them out that way) or plain (the workflow
+  // started before the tokens were encrypted, or the install has no
+  // encryption), and even one of each. Every activity that uses a token of a
+  // channel it got from a workflow goes through here first; a plain token is
+  // used as it is.
+  async decryptTokens<T extends Partial<Integration>>(integration: T) {
+    return integration
+      ? this._encryptionService.decryptFields(
+          integration,
+          integrationEncryptedFields
+        )
+      : integration;
+  }
+
+  // One page of the encryptTokensWorkflow: encrypts the tokens that are still
+  // stored plain. New tokens are already stored encrypted, this is for the
+  // ones that were stored before the encryption.
+  async encryptStoredTokens(afterId?: string) {
+    if (!this._encryptionService.canEncrypt()) {
+      // a configuration that has to change first, no retry will fix it
+      throw ApplicationFailure.nonRetryable(
+        'The encryption is off, set ENCRYPTION_PROVIDER and remove ENCRYPTION_READ_ONLY'
+      );
+    }
+
+    const integrations = await this._integrationRepository.getPlainTokens(
+      afterId
+    );
+
+    // A channel that cannot be encrypted is counted and skipped, it must not
+    // stop all the channels after it
+    let changed = 0;
+    let failed = 0;
+    for (const integration of integrations) {
+      try {
+        if (
+          await this._integrationRepository.encryptStoredTokens(integration)
+        ) {
+          changed++;
+        }
+      } catch (err) {
+        failed++;
+        console.error(
+          `Could not encrypt the stored tokens of integration ${integration.id}:`,
+          (err as Error)?.message
+        );
+      }
+    }
+
+    return {
+      changed,
+      failed,
+      lastId: integrations[integrations.length - 1]?.id,
+    };
   }
 
   async findFreeDateTime(

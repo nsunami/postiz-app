@@ -24,7 +24,10 @@ import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashbo
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 @Rules(
-  "Instagram should have at least one attachment, if it's a story, it can have only one picture"
+  [
+    "Instagram should have at least one attachment, if it's a story, it can have only one picture.",
+    'If the content of the post (text, pictures or video) was made with AI, ask the user if they want to mark it as AI, and set made_with_ai to true only when they say yes.',
+  ].join(' ')
 )
 export class InstagramProvider
   extends SocialAbstract
@@ -33,6 +36,8 @@ export class InstagramProvider
   identifier = 'instagram';
   name = 'Instagram\n(Facebook Business)';
   isBetweenSteps = true;
+  pageRequiredToPost = true;
+  noRefreshBeforeCall = true;
   toolTip = 'Instagram must be business and connected to a Facebook page';
   scopes = [
     'instagram_basic',
@@ -571,7 +576,7 @@ export class InstagramProvider
 
     // Fetch pages the user explicitly shared during the OAuth dialog
     await fetchPaginated(
-      `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/accounts?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
+      `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me/accounts?fields=id,instagram_business_account,username,name,access_token,picture.type(large)&limit=100&access_token=${accessToken}`
     );
 
     // Also fetch pages via Business Manager API to discover pages
@@ -587,7 +592,7 @@ export class InstagramProvider
           for (const business of bizResponse.data) {
             try {
               await fetchPaginated(
-                `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/owned_pages?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
+                `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/owned_pages?fields=id,instagram_business_account,username,name,access_token,picture.type(large)&limit=100&access_token=${accessToken}`
               );
             } catch {
               // Continue with other businesses
@@ -595,7 +600,7 @@ export class InstagramProvider
 
             try {
               await fetchPaginated(
-                `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/client_pages?fields=id,instagram_business_account,username,name,picture.type(large)&limit=100&access_token=${accessToken}`
+                `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${business.id}/client_pages?fields=id,instagram_business_account,username,name,access_token,picture.type(large)&limit=100&access_token=${accessToken}`
               );
             } catch {
               // Continue with other businesses
@@ -614,6 +619,7 @@ export class InstagramProvider
         .map(async (p: any) => {
           return {
             pageId: p.id,
+            disabledReason: !p.access_token ? 'not_granted' : undefined,
             ...(await (
               await fetch(
                 `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${p.instagram_business_account.id}?fields=name,profile_picture_url&access_token=${accessToken}`
@@ -629,6 +635,7 @@ export class InstagramProvider
       id: p.id,
       name: p.name,
       picture: { data: { url: p.profile_picture_url } },
+      disabledReason: p.disabledReason,
     }));
   }
 
@@ -642,6 +649,12 @@ export class InstagramProvider
         `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${data.pageId}?fields=access_token,name,picture.type(large)&access_token=${accessToken}`
       )
     ).json();
+
+    if (!access_token) {
+      throw new Error(
+        'Your Facebook user has no permission to manage this page. Ask a page admin for full content access, then reconnect the channel'
+      );
+    }
 
     const { id, name, profile_picture_url, username } = await (
       await fetch(
@@ -785,6 +798,7 @@ export class InstagramProvider
           )}`
         : ``;
     const isTrialReel = this.assetBoolean(firstPost.settings.is_trial_reel);
+    const madeWithAi = this.assetBoolean(firstPost.settings.made_with_ai);
     const medias = await Promise.all(
       firstPost?.media?.map(async (m) => {
         const caption =
@@ -836,6 +850,11 @@ export class InstagramProvider
         const itemCollaborators =
           firstPost?.media?.length === 1 ? collaborators : ``;
 
+        // is_ai_generated is rejected on carousel child items,
+        // it goes on the carousel container instead
+        const itemAiGenerated =
+          madeWithAi && !isCarousel ? `&is_ai_generated=true` : ``;
+
         // audio_configuration is only supported for Reels (single video, not a story)
         // and only with Facebook Login (not Instagram Login / graph.instagram.com)
         const audioConfiguration =
@@ -861,7 +880,7 @@ export class InstagramProvider
 
         const { id: photoId } = await (
           await this.fetch(
-            `https://${type}/${META_GRAPH_API_VERSION}/${id}/media?${mediaType}${altText}${isCarousel}${itemCollaborators}${trialParams}${audioConfiguration}&access_token=${accessToken}${caption}`,
+            `https://${type}/${META_GRAPH_API_VERSION}/${id}/media?${mediaType}${altText}${isCarousel}${itemCollaborators}${itemAiGenerated}${trialParams}${audioConfiguration}&access_token=${accessToken}${caption}`,
             {
               method: 'POST',
             }
@@ -898,6 +917,7 @@ export class InstagramProvider
                 ),
               }
             : {}),
+          ...(madeWithAi ? { madeWithAi } : {}),
         },
       },
     ];
@@ -912,6 +932,7 @@ export class InstagramProvider
       message?: string;
       carouselId?: string;
       collaborators?: string[];
+      madeWithAi?: boolean;
     },
     integration: Integration
   ): Promise<PendingCheckResponse> {
@@ -979,6 +1000,7 @@ export class InstagramProvider
       message?: string;
       carouselId?: string;
       collaborators?: string[];
+      madeWithAi?: boolean;
     },
     integration: Integration
   ): Promise<PendingCheckResponse> {
@@ -1041,6 +1063,8 @@ export class InstagramProvider
                   JSON.stringify(pendingData.collaborators)
                 )}`
               : ``
+          }${
+            pendingData.madeWithAi ? `&is_ai_generated=true` : ``
           }&access_token=${accessToken}`,
           {
             method: 'POST',

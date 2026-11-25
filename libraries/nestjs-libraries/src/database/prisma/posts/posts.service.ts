@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
 import { CreatePostDto } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
+import { MediaDto } from '@gitroom/nestjs-libraries/dtos/media/media.dto';
 import dayjs from 'dayjs';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
 import {
@@ -124,8 +125,14 @@ export class PostsService {
 
     const getIntegration = post.integration!;
 
+    // A deleted channel is neither refreshed nor called
+    if (getIntegration.deletedAt) {
+      return [];
+    }
+
     if (
-      dayjs(getIntegration?.tokenExpiration).isBefore(dayjs()) ||
+      (dayjs(getIntegration?.tokenExpiration).isBefore(dayjs()) &&
+        !integrationProvider.noRefreshBeforeCall) ||
       forceRefresh
     ) {
       const data = await this._refreshIntegrationService.refresh(
@@ -337,8 +344,14 @@ export class PostsService {
 
     const getIntegration = post.integration!;
 
+    // A deleted channel is neither refreshed nor called
+    if (getIntegration.deletedAt) {
+      return [];
+    }
+
     if (
-      dayjs(getIntegration?.tokenExpiration).isBefore(dayjs()) ||
+      (dayjs(getIntegration?.tokenExpiration).isBefore(dayjs()) &&
+        !integrationProvider.noRefreshBeforeCall) ||
       forceRefresh
     ) {
       const data = await this._refreshIntegrationService.refresh(
@@ -1134,35 +1147,6 @@ export class PostsService {
     return '';
   }
 
-  // A schedule-type save targeting an already-PUBLISHED post republishes it to
-  // the platform: require the explicit `republish` opt-in instead. The message
-  // doubles as the confirmation dialog for API/MCP automation.
-  private guardAgainstRepublish(
-    post: {
-      state: State;
-      publishDate: Date;
-      integration?: { providerIdentifier: string };
-    } | null,
-    source: 'createPost' | 'changeDate'
-  ) {
-    if (post?.state !== 'PUBLISHED') {
-      return;
-    }
-
-    const howToUpdate =
-      source === 'createPost' ? `use type 'update'` : `use action 'update'`;
-
-    throw new BadRequestException(
-      `This post was already published on ${dayjs
-        .utc(post.publishDate)
-        .format(
-          'YYYY-MM-DD HH:mm'
-        )} UTC. Saving it this way would publish it again to ${
-        post.integration?.providerIdentifier || 'the channel'
-      }. To edit without republishing, ${howToUpdate}. To intentionally publish again, pass republish: true.`
-    );
-  }
-
   async createPost(
     orgId: string,
     body: CreatePostDto,
@@ -1171,25 +1155,6 @@ export class PostsService {
   ): Promise<any[]> {
     const postList = [];
     const batchId = uuidv4();
-
-    const needsRepublishCheck = (post: CreatePostDto['posts'][number]) =>
-      (body.type === 'schedule' || body.type === 'now') &&
-      !body.republish &&
-      post.value?.[0]?.id;
-
-    // One batched lookup for the republish guard instead of a heavy
-    // `getPostById` (full integration + submittedForOrder tree) per post.
-    const guardPostIds = body.posts
-      .filter(needsRepublishCheck)
-      .map((post) => post.value[0].id);
-    const guardPostsMap = new Map(
-      (
-        await this._postRepository.getPostsForRepublishGuard(
-          orgId,
-          guardPostIds
-        )
-      ).map((guardPost) => [guardPost.id, guardPost])
-    );
 
     for (const post of body.posts) {
       // the posts to update can't belong to another organization, an id that
@@ -1205,12 +1170,6 @@ export class PostsService {
         ))
       ) {
         throw new NotFoundException('Post not found');
-      }
-      if (needsRepublishCheck(post)) {
-        this.guardAgainstRepublish(
-          guardPostsMap.get(post.value[0].id) || null,
-          'createPost'
-        );
       }
       const provider = this._integrationManager.getSocialIntegration(
         (post.settings as any)?.__type
@@ -1284,6 +1243,36 @@ export class PostsService {
     postId: string,
     settings: Record<string, any>,
     creationMethod: CreationMethod
+  ) {
+    return this.updateUnpublishedPost(
+      orgId,
+      postId,
+      { settings },
+      creationMethod
+    );
+  }
+
+  // Same as updatePostSettings for the media of the main post: the passed list
+  // replaces the existing one, an empty list removes all of it.
+  async updatePostAttachments(
+    orgId: string,
+    postId: string,
+    attachments: MediaDto[],
+    creationMethod: CreationMethod
+  ) {
+    return this.updateUnpublishedPost(
+      orgId,
+      postId,
+      { image: attachments },
+      creationMethod
+    );
+  }
+
+  private async updateUnpublishedPost(
+    orgId: string,
+    postId: string,
+    changes: { settings?: Record<string, any>; image?: MediaDto[] },
+    creationMethod: CreationMethod
   ): Promise<{ postId: string; publishDate: string }> {
     // Ordered as post -> comments, root includes integration and tags.
     const ordered = await this.getPostsRecursively(postId, true, orgId, true);
@@ -1326,12 +1315,12 @@ export class PostsService {
     // Merge: only the passed keys change, everything else stays.
     const mergedSettings = {
       ...existingSettings,
-      ...(settings || {}),
+      ...(changes.settings || {}),
       __type: integration.providerIdentifier,
     };
 
     // Keep the existing content/ids so the posts are updated in place (the
-    // workflow identity is preserved) - only the settings differ.
+    // workflow identity is preserved) - only the passed changes differ.
     const value = ordered.map((p) => {
       let image = [];
       try {
@@ -1341,7 +1330,7 @@ export class PostsService {
         id: p.id,
         content: p.content,
         delay: p.delay || 0,
-        image,
+        image: p.id === root.id && changes.image ? changes.image : image,
       };
     });
 
@@ -1388,7 +1377,7 @@ export class PostsService {
       orgId,
       {
         date,
-        // Settings-only update: keep the current state and leave the running
+        // In-place update: keep the current state and leave the running
         // publish workflow alone.
         type: 'update',
         shortLink: false,
@@ -1407,7 +1396,7 @@ export class PostsService {
       } as any,
       creationMethod,
       // Keep the group stable: a client may have the calendar open while the
-      // settings are updated out of band, and the calendar links posts by group.
+      // post is updated out of band, and the calendar links posts by group.
       true
     );
 
@@ -1458,14 +1447,9 @@ export class PostsService {
     orgId: string,
     id: string,
     date: string,
-    action: 'schedule' | 'update' = 'schedule',
-    republish = false
+    action: 'schedule' | 'update' = 'schedule'
   ) {
     const getPostById = await this._postRepository.getPostById(id, orgId);
-
-    if (action === 'schedule' && !republish) {
-      this.guardAgainstRepublish(getPostById, 'changeDate');
-    }
 
     // schedule: Set status to QUEUE and change date (reschedule the post)
     // update: Just change the date without changing the status

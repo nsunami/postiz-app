@@ -93,6 +93,7 @@ services:
       OPENAI_API_KEY: ''
       OPENAI_BASE_URL: ''
       OPENAI_MODEL: ''
+      OPENAI_RESPONSES_API: ''
       OPENAI_CHAT_MODEL: ''
       OPENAI_IMAGE_BASE_URL: ''
       OPENAI_IMAGE_API_KEY: ''
