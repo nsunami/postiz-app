@@ -13,6 +13,7 @@ import { OAuth2Client } from 'google-auth-library/build/src/auth/oauth2client';
 import { YoutubeSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/youtube.settings.dto';
 import {
   BadBody,
+  NotEnoughScopes,
   PublishedWithError,
   RefreshToken,
   SocialAbstract,
@@ -56,7 +57,12 @@ const clientAndYoutube = () => {
   return { client, youtube, oauth2, youtubeAnalytics };
 };
 
-@Rules('YouTube must have on video attachment, it cannot be empty')
+@Rules(
+  [
+    'YouTube must have on video attachment, it cannot be empty.',
+    'If the video was made or altered with AI, ask the user if they want to mark it as AI, and set made_with_ai to true only when they say yes. YouTube asks for it only when the content looks realistic, not for animation or clearly unrealistic content.',
+  ].join(' ')
+)
 export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   override maxConcurrentJob = 200; // YouTube has strict upload quotas
   identifier = 'youtube';
@@ -366,6 +372,11 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       });
 
       const channels = response.data.items || [];
+      if (!channels.length) {
+        throw new NotEnoughScopes(
+          'This Google account has no YouTube channel, please create one or connect the Google account that owns your channel'
+        );
+      }
 
       return channels.map((channel) => ({
         id: channel.id!,
@@ -380,7 +391,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       }));
     } catch (error) {
       console.error('Failed to fetch YouTube channels:', error);
-      return [];
+      throw error;
     }
   }
 
@@ -422,8 +433,8 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     const { client, youtube } = clientAndYoutube();
     client.setCredentials({ access_token: accessToken });
 
-    // don't go through pages() here, it swallows the real Google error and an
-    // empty list would be reported as a missing channel
+    // don't go through pages() here, it reports an empty list as an account
+    // without a channel
     const { data } = await youtube(client).channels.list({
       part: ['id'],
       mine: true,
@@ -622,6 +633,9 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
           status: {
             privacyStatus: settings.type,
             selfDeclaredMadeForKids: settings.selfDeclaredMadeForKids === 'yes',
+            ...(this.assetBoolean(settings.made_with_ai)
+              ? { containsSyntheticMedia: true }
+              : {}),
           },
         }),
       }

@@ -16,7 +16,6 @@ import {
 const model = new ChatOpenAI({
   apiKey: openaiApiKey(),
   model: openaiModel(),
-  temperature: 0,
   configuration: { baseURL: openaiBaseURL() },
 });
 
